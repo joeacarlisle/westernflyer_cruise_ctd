@@ -23,6 +23,10 @@ def setup_logging():
     )
 
 def main():
+    # Ensure necessary directories exist
+    (BASE_DIR / "logs").mkdir(exist_ok=True)
+    (BASE_DIR / "processed").mkdir(exist_ok=True)
+
     if len(sys.argv) < 2:
         print("Usage: python main.py <cruise_id>")
         sys.exit(1)
