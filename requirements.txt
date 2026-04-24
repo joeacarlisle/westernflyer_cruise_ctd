@@ -1,0 +1,14 @@
+# Data Processing & Storage
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+duckdb>=0.10.0
+gsw>=1.0.0
+
+# Visualization & Geospatial Stack
+holoviews>=1.17.0
+panel>=1.3.0
+bokeh>=3.3.0
+hvplot>=0.9.0
+cartopy>=0.22.0
+geoviews>=1.10.0
