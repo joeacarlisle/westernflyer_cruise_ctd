@@ -1,48 +1,31 @@
-# Western Flyer Foundation CTD Data Archive
-
+Western Flyer Foundation CTD Data Archive
 This repository contains the processing pipeline and visualization suite for Sea-Bird CTD data.
 
-## Root Directory Notes
-The project’s root directory can be named anything you prefer. 
-For example: `wf_cruise_ctd`
+Root Directory Notes
+The project’s root directory can be named anything you prefer (e.g., wf_cruise_ctd).
 
 To avoid Windows permission issues when running scripts or creating virtual environments, place the entire root folder inside your Windows user directory, such as:
-`C:\Users\<your_username>\wf_cruise_ctd`
+C:\Users\<your_username>\wf_cruise_ctd
 
 This ensures you have full read/write/execute permissions for all pipeline operations.
 
-## Python Installation Requirements
+Python Installation Requirements
 This project requires Python 3.12.10.
 
-### Windows Python Installation Notes
-When installing Python 3.12.10 on Windows:
-* The installer will ask: “Add Python to PATH?” → **Select NO**
-* This is intentional. You will explicitly point to the Python installation directory when creating the virtual environment.
-* Typical installation path: `C:\Users\<your_username>\AppData\Local\Programs\Python\Python312\`
+Windows
+When installing, the installer will ask: “Add Python to PATH?” Select NO.
+You will point to the installation directory explicitly during setup.
 
-### macOS Python Installation (Homebrew)
-Install Python 3.12 using Homebrew:
-```bash
-brew install python@3.12
-Then create your virtual environment:
+Typical path: C:\Users\<your_username>\AppData\Local\Programs\Python\Python312\
 
+macOS (Homebrew)
 Bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-Linux Python Installation (Ubuntu / Debian)
-Install Python 3.12 using the deadsnakes PPA:
-
+brew install python@3.12
+Linux (Ubuntu / Debian)
 Bash
 sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
 sudo apt install python3.12 python3.12-venv
-Then create your virtual environment:
-
-Bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 Project Structure
 Note: The logs and processed directories are automatically created when the database build pipeline is executed.
 
@@ -74,46 +57,41 @@ C:.
             baja2025_ctd_build.bat
             launch_holoviews.bat
 File Descriptions
-main.py — The master orchestration script. It triggers the processing pipeline for specified expeditions (e.g., baja2025) and manages the flow of data.
+main.py: The master orchestration script. It triggers the processing pipeline and manages data flow.
 
-sbe19plus_ingestion.py — Contains the logic for parsing and ingesting raw hex data from Sea-Bird SBE 19plus instruments.
+sbe19plus_ingestion.py: Logic for parsing raw hex data from Sea-Bird SBE 19plus instruments.
 
-eos80_processing.py — Handles the core oceanographic data processing, including EOS‑80 coefficient application, salinity, and density calculations.
+eos80_processing.py: Core oceanographic data processing (EOS‑80 coefficient application, salinity, density).
 
-ctd_holoviews.py — The visualization suite. Uses Panel, Holoviews, and Bokeh to render interactive dashboards for vertical profiles and T‑S diagrams.
+ctd_holoviews.py: Visualization suite using Panel, Holoviews, and Bokeh.
 
-requirements.txt — Lists all Python dependencies required to run the environment.
+requirements.txt: Python dependencies.
 
-calibration.csv — Contains sensor calibration parameters for the CTD build process.
+calibration.csv: Sensor calibration parameters.
 
-cruise_log.csv — Contains station metadata including latitude, longitude, and cruise event logs.
+cruise_log.csv: Station metadata, coordinates, and event logs.
 
-Setup: Virtual Environment & Dependencies
-Important: All setup commands must be run from the project root directory.
+Setup: Virtual Environment
+Run these commands from the project root directory.
 
 Windows (Command Prompt)
-When creating the virtual environment, explicitly point to your Python 3.12.10 installation:
-
 Bash
 "C:\Users\<your_username>\AppData\Local\Programs\Python\Python312\python.exe" -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-macOS
-Bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-Linux
+macOS / Linux
 Bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 Running the Pipeline (baja2025_ctd_build)
 Windows: Navigate to scripts/windows and run: baja2025_ctd_build.bat
+
 Linux / macOS: Navigate to scripts/linux_mac and run: ./baja2025_ctd_build
 
 Running the Dashboard (launch_holoviews)
 Windows: Navigate to scripts/windows and run: launch_holoviews.bat
+
 Linux / macOS: Navigate to scripts/linux_mac and run: ./launch_holoviews
 
 Contact
