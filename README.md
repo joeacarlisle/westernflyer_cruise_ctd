@@ -59,7 +59,7 @@ You will point to the installation directory explicitly during setup.
 
 ## File Descriptions
 * **main.py**: The master orchestration script. It triggers the processing pipeline and manages data flow.
-* **sbe19plus_ingestion.py**: Logic for parsing raw hex data from Sea-Bird SBE 19plus instruments.
+* **sbe19plus_ingestion.py**: Logic for parsing cnv data from Sea-Bird SBE 19plus instruments. 
 * **eos80_processing.py**: Core oceanographic data processing (EOS‑80 coefficient application, salinity, density).
 * **ctd_holoviews.py**: Visualization suite using Panel, Holoviews, and Bokeh.
 * **requirements.txt**: Python dependencies.
