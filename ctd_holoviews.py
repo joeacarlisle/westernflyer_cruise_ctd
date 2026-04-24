@@ -174,7 +174,7 @@ tabs = pn.Tabs(
 )
 
 dashboard = pn.template.FastListTemplate(
-    title="Western Flyer - Cruise CTD", 
+    title="Western Flyer - CTD Data", 
     sidebar=[cruise_select, station_select, depth_slider, qc_toggle, pn.pane.Markdown("---"), csv_button], 
     main=[tabs], accent_base_color="#00f2ff", header_background="#1a1a1a"
 )
