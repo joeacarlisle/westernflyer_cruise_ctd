@@ -59,7 +59,7 @@ You will point to the installation directory explicitly during setup.
 
 ## File Descriptions
 * **main.py**: The master orchestration script. It triggers the processing pipeline and manages data flow.
-* **sbe19plus_ingestion.py**: Logic for parsing cnv data from Sea-Bird SBE 19plus instruments. 
+* **sbe19plus_ingestion.py**: Logic for parsing raw hex data from Sea-Bird SBE 19plus instruments.
 * **eos80_processing.py**: Core oceanographic data processing (EOS‑80 coefficient application, salinity, density).
 * **ctd_holoviews.py**: Visualization suite using Panel, Holoviews, and Bokeh.
 * **requirements.txt**: Python dependencies.
@@ -72,7 +72,7 @@ You will point to the installation directory explicitly during setup.
 ### Windows (Command Prompt)
     "C:\Users\<your_username>\AppData\Local\Programs\Python\Python312\python.exe" -m venv .venv
     .venv\Scripts\activate
-    pip install -r requirements.txt -v
+    pip install -r requirements.txt
 
 ### macOS / Linux
     python3.12 -m venv .venv
@@ -80,12 +80,16 @@ You will point to the installation directory explicitly during setup.
     pip install -r requirements.txt
 
 ## Running the Pipeline (baja2025_ctd_build)
+*Note: If on macOS or Linux, you must first make the scripts executable:*
+    chmod +x scripts/linux_mac/baja2025_ctd_build.sh
+    chmod +x scripts/linux_mac/launch_holoviews.sh
+
 * **Windows:** Navigate to `scripts/windows` and run: `baja2025_ctd_build.bat`
-* **Linux / macOS:** Navigate to `scripts/linux_mac` and run: `./baja2025_ctd_build`
+* **Linux / macOS:** Navigate to `scripts/linux_mac` and run: `./baja2025_ctd_build.sh`
 
 ## Running the Dashboard (launch_holoviews)
 * **Windows:** Navigate to `scripts/windows` and run: `launch_holoviews.bat`
-* **Linux / macOS:** Navigate to `scripts/linux_mac` and run: `./launch_holoviews`
+* **Linux / macOS:** Navigate to `scripts/linux_mac` and run: `./launch_holoviews.sh`
 
 ## Contact
 For questions regarding this data archive or the Western Flyer Foundation, please contact **joeacarlisle@gmail.com**
