@@ -91,7 +91,7 @@ def apply_physics(df, config):
     df['theta'] = df.apply(lambda r: calculate_theta_eos80(r['SP'], r['t68'], r['pres_raw']), axis=1)
     df['rho'] = calculate_density_eos80(df['SP'], df['t68'], df['pres_raw'])
     df['o2_final'] = (df['o2_umol_l'] * float(config.get('O2_BOOST_RATIO', 1.0))) / (df['rho'] / 1000.0)
-    df['ph_final'] = df['ph_raw'] + float(config.get('PH_DRIFT', 0.01))
+    df['ph_final'] = df['ph_raw'] + float(config.get('PH_DRIFT', 0.0))
     df['chl_final'] = df['chl_raw']
     
     targets = ['rho', 'SP', 'theta', 'o2_final', 'ph_final']
