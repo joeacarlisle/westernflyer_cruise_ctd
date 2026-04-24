@@ -72,7 +72,7 @@ You will point to the installation directory explicitly during setup.
 ### Windows (Command Prompt)
     "C:\Users\<your_username>\AppData\Local\Programs\Python\Python312\python.exe" -m venv .venv
     .venv\Scripts\activate
-    pip install -r requirements.txt
+    pip install -r requirements.txt -v
 
 ### macOS / Linux
     python3.12 -m venv .venv
