@@ -81,6 +81,7 @@ You will point to the installation directory explicitly during setup.
 
 ## Running the Pipeline (baja2025_ctd_build)
 *Note: If on macOS or Linux, you must first make the scripts executable:*
+
     chmod +x scripts/linux_mac/baja2025_ctd_build.sh
     chmod +x scripts/linux_mac/launch_holoviews.sh
 
