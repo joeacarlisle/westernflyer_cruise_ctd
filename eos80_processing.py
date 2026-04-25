@@ -101,6 +101,7 @@ def apply_physics(df, config):
     return df
 
 def apply_surgical_chl(df, config):
+    offset = float(config.get('CHL_OFFSET', 0.0))
     win = int(config.get('CHL_WINDOW', 5))
     poly = int(config.get('CHL_POLY', 2))
     roll = int(config.get('CHL_ROLL', 4))
@@ -108,6 +109,8 @@ def apply_surgical_chl(df, config):
     df['chl_final'] = df['chl_final'].interpolate(method='linear', limit_direction='both').fillna(0)
     df['chl_final'] = savgol_filter(df['chl_final'], win, poly)
     df['chl_final'] = df['chl_final'].rolling(window=roll, center=True).max().ffill().bfill()
+    
+    df['chl_final'] = df['chl_final'] + offset
     return df
 
 def apply_qc_flags(df, config):
