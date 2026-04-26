@@ -110,11 +110,13 @@ def view_profiles(target_cruise, target_id, z_range, filter_qc, show_soak):
                   fontsize={'labels': '8pt', 'xticks': '7pt', 'yticks': '7pt', 'legend': '7pt'})
     
     p1 = hv.Curve(df, 'theta', 'depth_m', label='Pot. Temp').opts(**v_opts, color='blue', width=175, xlabel='theta (°C)')
+    p6 = hv.Curve(df, 'in_situ_temp', 'depth_m', label='In-Situ Temp').opts(**v_opts, color='purple', width=140, yaxis=None, xlabel='T (°C)')
     p2 = hv.Curve(df, 'SP', 'depth_m', label='Prac. Sal').opts(**v_opts, color='red', width=140, yaxis=None, xlabel='SP (PSU)')
     p3 = hv.Curve(df, 'o2_final', 'depth_m', label='O2').opts(**v_opts, color='black', width=155, yaxis=None, xlabel='O2 (µmol/kg)')
     p4 = hv.Curve(df, 'ph_final', 'depth_m', label='pH').opts(**v_opts, color='orange', width=125, yaxis=None, xlabel='pH')
     p5 = hv.Curve(df, 'chl_final', 'depth_m', label='Chl').opts(**v_opts, color='green', width=125, yaxis=None, xlabel='Chl (mg/m³)')
-    return (p1 + p2 + p3 + p4 + p5).cols(5).opts(shared_axes=True, merge_tools=True)
+    
+    return (p1 + p6 + p2 + p3 + p4 + p5).cols(6).opts(shared_axes=True, merge_tools=True)
 
 @pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
 def view_ts_analysis(target_cruise, target_id, z_range, filter_qc, show_soak):
