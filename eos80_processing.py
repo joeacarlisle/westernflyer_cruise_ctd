@@ -65,10 +65,13 @@ def apply_soak_elimination(df, config):
     min_velocity = float(config.get('LOOP_MIN_VELOCITY', 0.25))
     dp = df['pres_raw'].diff() * 4
     descent_mask = (df['pres_raw'] > soak_depth) & (dp > min_velocity)
+    
+    df['is_soak'] = True
     for i in range(len(descent_mask) - 20):
         if descent_mask.iloc[i:i+20].all():
-            return df.loc[df.index[i]:].copy()
-    return df[df['pres_raw'] > soak_depth].copy()
+            df.loc[df.index[i]:, 'is_soak'] = False
+            break
+    return df
 
 def apply_tau_shift(df, config):
     shift_steps = int(float(config.get('ALIGN_OXY_SHIFT', 5.0)))
@@ -106,15 +109,27 @@ def apply_surgical_chl(df, config):
     poly = int(config.get('CHL_POLY', 2))
     roll = int(config.get('CHL_ROLL', 4))
     
+    # Calculate dynamic baseline: find the minimum raw signal and nullify it
+    min_raw = df['chl_raw'].min()
+    dynamic_offset = -min_raw if min_raw < 0 else 0.0
+    
+    # Combine dynamic baseline + user offset + raw signal
+    df['chl_final'] = df['chl_raw'] + dynamic_offset + offset
+    
     df['chl_final'] = df['chl_final'].interpolate(method='linear', limit_direction='both').fillna(0)
     df['chl_final'] = savgol_filter(df['chl_final'], win, poly)
     df['chl_final'] = df['chl_final'].rolling(window=roll, center=True).max().ffill().bfill()
     
-    df['chl_final'] = df['chl_final'] + offset
     return df
 
 def apply_qc_flags(df, config):
     threshold = float(config.get('QC_VELOCITY', 0.25))
-    df['qc_flag'] = 3
-    df.loc[df['pres_raw'].diff() * 4 >= threshold, 'qc_flag'] = 1
+    
+    # Initialize all as Good (1)
+    df['qc_flag'] = 1
+    
+    # Flag high velocity as Bad (3)
+    mask_bad_velocity = df['pres_raw'].diff() * 4 >= threshold
+    df.loc[mask_bad_velocity, 'qc_flag'] = 3
+    
     return df
