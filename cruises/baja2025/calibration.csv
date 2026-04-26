@@ -7,7 +7,7 @@ CTD_SERIAL,8289
 SAL_OFFSET,0.0
 PH_DRIFT,0.0
 O2_BOOST_RATIO,1.0
-CHL_OFFSET,0.12
+CHL_OFFSET,0.0
 
 # --- SBE PROCESSING CONSTANTS ---
 CTM_ALPHA,0.04
@@ -19,8 +19,16 @@ CHL_WINDOW,5
 CHL_POLY,2
 CHL_ROLL,4
 
-# --- QC THRESHOLDS ---
-MIN_SAFE_PRESSURE,2.5
+# --- SOAK DETECTION PARAMETERS ---
+# Hard depth floor (meters) used as a safety net
+MIN_DEPTH_FLOOR,1.0
+# Velocity (m/s) required to confirm stable descent
 LOOP_MIN_VELOCITY,0.25
-QC_VELOCITY,0.25
+# Number of consecutive samples required to define 'stable'
+SOAK_WINDOW_SIZE,20
+
+# --- QC AND RESOLUTION THRESHOLDS ---
+# Speed (m/s) above which data is flagged as unstable
+QC_VELOCITY,1.2
+# Vertical resolution (meters) of binned database records
 BIN_SIZE_METERS,1.0
