@@ -64,7 +64,12 @@ def main():
             df = eos80_processing.apply_surgical_chl(df, config)
             df = eos80_processing.apply_qc_flags(df, config)
             
-            # C. Binning & Aggregation
+            # C. Downcast Isolation (Truncation Logic)
+            # Find the index of maximum pressure and truncate the data
+            max_idx = df['pres_raw'].idxmax()
+            df = df.iloc[:max_idx + 1]
+            
+            # D. Binning & Aggregation
             OUTPUT_RES = float(config.get('BIN_SIZE_METERS', 1.0))
             df['dbar_bin'] = (df['pres_raw'] / OUTPUT_RES).round() * OUTPUT_RES
             df['depth_m'] = df.apply(lambda r: eos80_processing.calculate_depth_eos80(r['dbar_bin'], r['lat']), axis=1)
@@ -73,12 +78,14 @@ def main():
                 'time_iso': 'min', 
                 'rho': 'mean', 'SP': 'mean', 'theta': 'mean',
                 'o2_final': 'mean', 'ph_final': 'mean', 'chl_final': 'mean', 
-                'lat': 'first', 'lon': 'first', 'qc_flag': 'min'
+                'lat': 'first', 'lon': 'first', 
+                'qc_flag': 'max', 
+                'is_soak': 'max'
             }
             
             df_binned = df.groupby(['station_id', 'station_name', 'sb_cast', 'wf_cast', 'dbar_bin', 'depth_m']).agg(agg_config).reset_index()
             
-            # D. Metadata Injection
+            # E. Metadata Injection
             df_binned['cruise_id'] = cruise_id
             df_binned['filename'] = file_path.name
             
