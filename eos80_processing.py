@@ -104,17 +104,14 @@ def apply_physics(df, config):
     return df
 
 def apply_surgical_chl(df, config):
+    slope = float(config.get('CHL_SLOPE', 1.0))
     offset = float(config.get('CHL_OFFSET', 0.0))
     win = int(config.get('CHL_WINDOW', 5))
     poly = int(config.get('CHL_POLY', 2))
     roll = int(config.get('CHL_ROLL', 4))
     
-    # Calculate dynamic baseline: find the minimum raw signal and nullify it
-    min_raw = df['chl_raw'].min()
-    dynamic_offset = -min_raw if min_raw < 0 else 0.0
-    
-    # Combine dynamic baseline + user offset + raw signal
-    df['chl_final'] = df['chl_raw'] + dynamic_offset + offset
+    # Calculate Chl-a using slope and offset
+    df['chl_final'] = (df['chl_raw'] * slope) + offset
     
     df['chl_final'] = df['chl_final'].interpolate(method='linear', limit_direction='both').fillna(0)
     df['chl_final'] = savgol_filter(df['chl_final'], win, poly)
