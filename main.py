@@ -65,7 +65,6 @@ def main():
             df = eos80_processing.apply_qc_flags(df, config)
             
             # C. Downcast Isolation (Truncation Logic)
-            # Find the index of maximum pressure and truncate the data
             max_idx = df['pres_raw'].idxmax()
             df = df.iloc[:max_idx + 1]
             
@@ -78,6 +77,7 @@ def main():
                 'time_iso': 'min', 
                 'rho': 'mean', 'SP': 'mean', 'theta': 'mean',
                 'o2_final': 'mean', 'ph_final': 'mean', 'chl_final': 'mean', 
+                'in_situ_temp': 'mean', # Updated to retain the new column
                 'lat': 'first', 'lon': 'first', 
                 'qc_flag': 'max', 
                 'is_soak': 'max'
