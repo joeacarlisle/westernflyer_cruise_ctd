@@ -2,8 +2,8 @@
 REM Generic build script for any cruise.
 REM
 REM Usage:   ctd_build.bat <cruise_id> [extra args forwarded to main.py]
-REM Example: ctd_build.bat baja2025
-REM Example: ctd_build.bat baja2025 --bin-size 0.5
+REM Example: ctd_build.bat 2025_Baja
+REM Example: ctd_build.bat 2025_Baja --bin-size 0.5
 
 REM Capture script directory BEFORE any shift calls.
 REM %~dp0 is derived from %0, which shifts along with %1..%9 on each
@@ -13,7 +13,7 @@ set "SCRIPT_DIR=%~dp0"
 
 if "%~1"=="" (
     echo Usage: %~nx0 ^<cruise_id^> [extra args]
-    echo Example: %~nx0 baja2025
+    echo Example: %~nx0 2025_Baja
     pause
     exit /b 2
 )

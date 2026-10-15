@@ -31,7 +31,7 @@ if not DB_PATH.exists():
 con = duckdb.connect(str(DB_PATH), read_only=True)
 
 # Fetch Metadata
-raw_cruises = con.execute(f"SELECT DISTINCT cruise_id FROM {TABLE_NAME}").df()['cruise_id'].tolist()
+raw_cruises = con.execute(f"SELECT DISTINCT cruise_id FROM {TABLE_NAME} ORDER BY cruise_id").df()['cruise_id'].tolist()
 
 # Initialize default stations for the first cruise
 default_cruise = raw_cruises[0]

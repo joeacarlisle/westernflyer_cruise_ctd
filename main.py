@@ -256,14 +256,17 @@ def main(argv=None):
             )
             processed_data.append(df_binned)
         except Exception as exc:
-            logging.exception(f"Failed to process {file_path.name}: {exc}")
-            failures.append(file_path.name)
+            logging.error(f"Failed to process {file_path.name}: {exc}")
+            logging.debug("Traceback for %s", file_path.name, exc_info=True)
+            failures.append((file_path.name, str(exc)))
             continue
 
     if not processed_data:
         logging.warning("No data processed; database not updated.")
         if failures:
-            logging.warning(f"All {len(failures)} casts failed: {failures}")
+            logging.warning(f"All {len(failures)} casts failed:")
+            for name, reason in failures:
+                logging.warning(f"  {name}: {reason}")
         sys.exit(1 if failures else 0)
 
     full_df = pd.concat(processed_data, ignore_index=True)
@@ -271,7 +274,9 @@ def main(argv=None):
     commit_to_duckdb(full_df, cruise_id, args.db, xmlcon_path, build_started)
 
     if failures:
-        logging.warning(f"Pipeline finished with {len(failures)} failed casts: {failures}")
+        logging.warning(f"Pipeline finished with {len(failures)} failed casts:")
+        for name, reason in failures:
+            logging.warning(f"  {name}: {reason}")
     else:
         logging.info("Pipeline finished successfully.")
 

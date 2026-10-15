@@ -1,0 +1,236 @@
+* Sea-Bird SBE19plus  Data File:
+* FileName = C:\Documents and Settings\lab\Desktop\Western Flyer 2025\8289_cast51_2025_09_09.hex
+* Software version 1.00h
+* Temperature SN = 8289
+* Conductivity SN = 8289
+* System UpLoad Time = Sep 09 2025 09:40:51
+* <ApplicationData>
+* <Seaterm232>
+* <SoftwareVersion>1.00h</SoftwareVersion>
+* <BuildDate>30-Jun-2009</BuildDate>
+* </Seaterm232>
+* </ApplicationData>
+* <InstrumentState>
+* <HardwareData DeviceType='SBE19plus' SerialNumber='01908289'>
+*    <Manufacturer>Sea-Bird Electronics, Inc.</Manufacturer>
+*    <FirmwareVersion>3.1.8</FirmwareVersion>
+*    <FirmwareDate>Mar  9 2016 16:22:29</FirmwareDate>
+*    <CommandSetVersion>1.4</CommandSetVersion>
+*    <PCBAssembly PCBSerialNum='273904' AssemblyNum='41054K'/>
+*    <PCBAssembly PCBSerialNum='273908' AssemblyNum='41059E'/>
+*    <PCBAssembly PCBSerialNum='274078' AssemblyNum='41606B'/>
+*    <PCBAssembly PCBSerialNum='273906' AssemblyNum='41967C'/>
+*    <MfgDate>10 Apr 2023</MfgDate>
+*    <InternalSensors>
+*       <Sensor id='Main Temperature'>
+*          <type>temperature0</type>
+*          <SerialNumber>01908289</SerialNumber>
+*       </Sensor>
+*       <Sensor id='Main Conductivity'>
+*          <type>conductivity-0</type>
+*          <SerialNumber>01908289</SerialNumber>
+*       </Sensor>
+*       <Sensor id='Main Pressure'>
+*          <type>strain-0</type>
+*          <SerialNumber>5213177</SerialNumber>
+*       </Sensor>
+*    </InternalSensors>
+*    <ExternalSensors>
+*       <Sensor id='volt 0'>
+*          <type>OXY</type>
+*          <SerialNumber>43-4400</SerialNumber>
+*       </Sensor>
+*       <Sensor id='volt 1'>
+*          <type>pH</type>
+*          <SerialNumber>18-1696</SerialNumber>
+*       </Sensor>
+*       <Sensor id='volt 2'>
+*          <type>not assigned</type>
+*          <SerialNumber>not assigned</SerialNumber>
+*       </Sensor>
+*       <Sensor id='volt 3'>
+*          <type>CHL</type>
+*          <SerialNumber>FLRTD-8047</SerialNumber>
+*       </Sensor>
+*       <Sensor id='volt 4'>
+*          <type>not assigned</type>
+*          <SerialNumber>not assigned</SerialNumber>
+*       </Sensor>
+*       <Sensor id='volt 5'>
+*          <type>not assigned</type>
+*          <SerialNumber>not assigned</SerialNumber>
+*       </Sensor>
+*       <Sensor id='serial'>
+*          <type>not assigned</type>
+*          <SerialNumber>not assigned</SerialNumber>
+*       </Sensor>
+*    </ExternalSensors>
+* </HardwareData>
+* <StatusData DeviceType='SBE19plus' SerialNumber='01908289'>
+*    <DateTime>2025-09-09T09:40:39</DateTime>
+*    <LoggingState>not logging</LoggingState>
+*    <EventSummary numEvents='0'/>
+*    <Power>
+*       <vMain>11.7</vMain>
+*       <vLith>8.5</vLith>
+*       <iMain>62.7</iMain>
+*       <iPump>63.8</iPump>
+*       <iExt01>14.5</iExt01>
+*       <iExt2345>25.2</iExt2345>
+*    </Power>
+*    <MemorySummary>
+*       <Bytes>3801608</Bytes>
+*       <Samples>223624</Samples>
+*       <SamplesFree>3646855</SamplesFree>
+*       <SampleLength>17</SampleLength>
+*       <Profiles>51</Profiles>
+*    </MemorySummary>
+* </StatusData>
+* <ConfigurationData DeviceType='SBE19plus' SerialNumber='01908289'>
+*    <ProfileMode>
+*       <ScansToAverage>1</ScansToAverage>
+*       <MinimumCondFreq>3160</MinimumCondFreq>
+*       <PumpDelay>60</PumpDelay>
+*       <AutoRun>no</AutoRun>
+*       <IgnoreSwitch>no</IgnoreSwitch>
+*    </ProfileMode>
+*    <Battery>
+*       <Type>alkaline</Type>
+*       <CutOff>7.5</CutOff>
+*    </Battery>
+*    <DataChannels>
+*       <ExtVolt0>yes</ExtVolt0>
+*       <ExtVolt1>yes</ExtVolt1>
+*       <ExtVolt2>yes</ExtVolt2>
+*       <ExtVolt3>no</ExtVolt3>
+*       <ExtVolt4>no</ExtVolt4>
+*       <ExtVolt5>no</ExtVolt5>
+*       <SBE38>no</SBE38>
+*       <WETLABS>no</WETLABS>
+*       <OPTODE>no</OPTODE>
+*       <SBE63>no</SBE63>
+*       <SeaFET>no</SeaFET>
+*       <GTD>no</GTD>
+*    </DataChannels>
+*    <EchoCharacters>yes</EchoCharacters>
+*    <OutputExecutedTag>yes</OutputExecutedTag>
+*    <OutputFormat>raw HEX</OutputFormat>
+* </ConfigurationData>
+* <CalibrationCoefficients DeviceType='SBE19plus' SerialNumber='01908289'>
+*    <Calibration format='TEMP1' id='Main Temperature'>
+*       <SerialNum>01908289</SerialNum>
+*       <CalDate>13-Oct-23</CalDate>
+*       <TA0>1.230691e-03</TA0>
+*       <TA1>2.778327e-04</TA1>
+*       <TA2>-1.088448e-06</TA2>
+*       <TA3>1.786762e-07</TA3>
+*       <TOFFSET>0.000000e+00</TOFFSET>
+*    </Calibration>
+*    <Calibration format='WBCOND0' id='Main Conductivity'>
+*       <SerialNum>01908289</SerialNum>
+*       <CalDate>13-Oct-23</CalDate>
+*       <G>-1.009139e+00</G>
+*       <H>1.425034e-01</H>
+*       <I>-1.004803e-05</I>
+*       <J>2.046773e-05</J>
+*       <CPCOR>-9.570000e-08</CPCOR>
+*       <CTCOR>3.250000e-06</CTCOR>
+*       <CSLOPE>1.000000e+00</CSLOPE>
+*    </Calibration>
+*    <Calibration format='STRAIN0' id='Main Pressure'>
+*       <SerialNum>5213177</SerialNum>
+*       <CalDate>22-Sep-23</CalDate>
+*       <PA0>-2.794997e-01</PA0>
+*       <PA1>8.994586e-03</PA1>
+*       <PA2>4.220020e-11</PA2>
+*       <PTCA0>5.251397e+05</PTCA0>
+*       <PTCA1>-8.408667e+00</PTCA1>
+*       <PTCA2>3.168776e-01</PTCA2>
+*       <PTCB0>1.024823e+02</PTCB0>
+*       <PTCB1>5.023341e-04</PTCB1>
+*       <PTCB2>0.000000e+00</PTCB2>
+*       <PTEMPA0>-8.529365e+01</PTEMPA0>
+*       <PTEMPA1>4.009631e+01</PTEMPA1>
+*       <PTEMPA2>1.478832e+00</PTEMPA2>
+*       <POFFSET>0.000000e+00</POFFSET>
+*       <PRANGE>2.900000e+03</PRANGE>
+*    </Calibration>
+*    <Calibration format='VOLT0' id='Volt 0'>
+*       <OFFSET>-4.654200e-02</OFFSET>
+*       <SLOPE>1.251361e+00</SLOPE>
+*    </Calibration>
+*    <Calibration format='VOLT0' id='Volt 1'>
+*       <OFFSET>-4.626200e-02</OFFSET>
+*       <SLOPE>1.252331e+00</SLOPE>
+*    </Calibration>
+*    <Calibration format='VOLT0' id='Volt 2'>
+*       <OFFSET>-4.654000e-02</OFFSET>
+*       <SLOPE>1.253026e+00</SLOPE>
+*    </Calibration>
+*    <Calibration format='VOLT0' id='Volt 3'>
+*       <OFFSET>-4.701100e-02</OFFSET>
+*       <SLOPE>1.252499e+00</SLOPE>
+*    </Calibration>
+*    <Calibration format='VOLT0' id='Volt 4'>
+*       <OFFSET>-4.529500e-02</OFFSET>
+*       <SLOPE>1.251688e+00</SLOPE>
+*    </Calibration>
+*    <Calibration format='VOLT0' id='Volt 5'>
+*       <OFFSET>-4.586900e-02</OFFSET>
+*       <SLOPE>1.252465e+00</SLOPE>
+*    </Calibration>
+*    <Calibration format='FREQ0' id='external frequency channel'>
+*       <EXTFREQSF>1.000015e+00</EXTFREQSF>
+*    </Calibration>
+* </CalibrationCoefficients>
+* <EventCounters DeviceType='SBE19plus' SerialNumber='01908289'>
+*    <EventSummary numEvents='0'/>
+* </EventCounters></InstrumentState>
+* <CastHeader>
+* <![CDATA[
+* DH51,51
+* cast  51 09 Sep 2025 08:06:06 samples 223593 to 223624, avg = 1, stop = mag switch
+* <Executed/>
+* ]]>
+* </CastHeader>
+* <UserHeaderInsert>
+* <![CDATA[
+** Lat 
+** Long 
+** Sation 
+** on dEck
+* ]]>
+* </UserHeaderInsert>
+*END*
+04713B0A76C60809957A2E8B6888E52EBC
+0471510A76C40809967A2E8B7088DC2ECC
+0471660A76C60809967A2E8B6C88F52EC8
+0471810A76C40809947A2E8B7089182EB4
+0471AE0A76C60809977A2E8B70893A2EB0
+0471F70A76C80809967A2E8B7089262EB6
+0472670A76C40809967A2F8B70890D2EB3
+0473070A76C60809947A2F8B7288E42EAB
+0473970A76C40809947A2F8B7089032EB6
+0473E10A76C60809957A2F8B7889122EB4
+0473E00A76C80809957A2F8B73891F2EB3
+0473CA0A76C80809977A2F8B7289102EBA
+04739E0A76C80809967A308B66890C2EB5
+04734A0A76C60809957A308B7289142EBB
+0472CC0A76C80809947A308B6789152EB6
+0472610A76C40809947A308B7789162EB9
+0472380A76C80809957A318B7789192EBE
+0472450A76C60809957A308B7789102EB9
+04726B0A76C60809967A318B7489122EB5
+04729C0A76C60809977A318B7289132EA1
+0472D60A76C40809967A318B7289132EA6
+04730E0A76C40809957A318B7A89112EA4
+0473340A76C60809967A328B7689122EA2
+04733B0A76C80809947A318B7A89182EAB
+0473320A76C20809947A318B7A89102EA4
+0473200A76C80809957A318B7289122EAC
+04730D0A76C60809957A308B7C89172EA6
+0472F90A76C60809947A308B7889112EAA
+0472E70A76CA0809957A308B7689092EB8
+0472D40A76C60809957A2F8B7289102EB2
+0472BE0A76C60809967A308B7A891C2EB9
+0472AB0A76C80809957A308B8389982EB9

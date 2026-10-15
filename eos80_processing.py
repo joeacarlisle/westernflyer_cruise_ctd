@@ -282,10 +282,21 @@ def apply_loop_edit(df, config):
     upstream by ``apply_soak_elimination``.
     """
     min_velocity = float(config.get('LOOP_MIN_VELOCITY', 0.25))
+    # Deepest point at which a downcast may begin. Shares MIN_DEPTH_FLOOR with
+    # soak detection so one setting controls both.
+    max_soak_depth = float(config.get('MIN_DEPTH_FLOOR', 10.0))
     dt = 1.0 / _sample_rate_hz(df)
 
     pres  = df['pres_raw'].to_numpy()
     n     = len(pres)
+    p_max = float(np.nanmax(pres))
+    if p_max <= max_soak_depth:
+        raise ValueError(
+            f"Cast never goes deeper than MIN_DEPTH_FLOOR ({max_soak_depth:g}): "
+            f"max pressure is {p_max:.1f} dbar. Set MIN_DEPTH_FLOOR in the "
+            f"[soak_detection] section of config.toml to less than the cast's "
+            f"maximum depth."
+        )
     lat   = float(df['lat'].iloc[0]) if ('lat' in df.columns and not pd.isna(df['lat'].iloc[0])) else 23.0
     flag  = np.zeros(n, dtype=float)
 
@@ -300,7 +311,7 @@ def apply_loop_edit(df, config):
         mean_speed_percent=0.0,    # unused for FIXED type
         remove_surface_soak=False, # handled by apply_soak_elimination
         min_soak_depth=0.0,
-        max_soak_depth=10.0,
+        max_soak_depth=max_soak_depth,
         use_deck_pressure_offset=False,
         exclude_flags=False,
     )
@@ -499,6 +510,14 @@ def apply_wild_edit(df, config):
 
     targets = ['SP', 'theta', 'rho', 'o2_final', 'ph_final', 'chl_final', 'in_situ_temp']
     n = len(df)
+    if n == 0:
+        return df
+    # The Sea-Bird wild_edit fails on casts with fewer scans than one block
+    # (short casts in shallow water), so shrink the block to the cast length.
+    if n < block:
+        logging.info("Wild Edit: only %d scans after Loop Edit (< WILD_SCANS_PER_BLOCK=%d); "
+                     "using a single block of %d scans.", n, block, n)
+        block = n
     base_flags = np.zeros(n, dtype=float)
 
     for col in targets:

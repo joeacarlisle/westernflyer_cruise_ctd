@@ -3,7 +3,7 @@
 # Generic build script for any cruise.
 #
 # Usage:   ./ctd_build.sh <cruise_id>
-# Example: ./ctd_build.sh baja2025
+# Example: ./ctd_build.sh 2025_Baja
 #
 # Make executable once with:  chmod +x ctd_build.sh
 
@@ -11,7 +11,7 @@ set -u
 
 if [ "$#" -lt 1 ]; then
     echo "Usage: $0 <cruise_id>"
-    echo "Example: $0 baja2025"
+    echo "Example: $0 2025_Baja"
     read -p "Press any key to continue..."
     exit 2
 fi

@@ -61,27 +61,74 @@ This has the advantage of not requiring root privileges, and it does not install
     |   pyproject.toml
     |   sbe19plus_ingestion.py
     +---cruises
-    |   \---baja2025
-    |       |   config.toml        processing parameters
-    |       |   calibration.xmlcon     sensor calibration (from SeaSoft)
-    |       |   stations.csv         station metadata
+    |   +---2025_Baja
+    |   |   |   config.toml           processing parameters
+    |   |   |   calibration.xmlcon    sensor calibration (from SeaSoft)
+    |   |   |   stations.csv          station metadata
+    |   |   |
+    |   |   \---hex
+    |   |           20250416_cast1.hex
+    |   |           20250416_cast2.hex
+    |   |           ... (etc)
+    |   |
+    |   +---2025_MontereyBay
+    |   |   |   config.toml           processing parameters
+    |   |   |   calibration.xmlcon    sensor calibration (from SeaSoft)
+    |   |   |   stations.csv          station metadata
+    |   |   |
+    |   |   \---hex
+    |   |           20250714_NPS_cast1.hex
+    |   |           20250714_NPS_cast2.hex
+    |   |           ... (etc)
+    |   |
+    |   +---2026_MontereyBay
+    |   |   |   config.toml           processing parameters
+    |   |   |   calibration.xmlcon    sensor calibration (from SeaSoft)
+    |   |   |   stations.csv          station metadata
+    |   |   |
+    |   |   \---hex
+    |   |           20260401_cast1.hex
+    |   |           20260401_cast2.hex
+    |   |           ... (etc)
+    |   |
+    |   \---2026_PNW
+    |       |   config.toml           processing parameters
+    |       |   calibration.xmlcon    sensor calibration (from SeaSoft)
+    |       |   stations.csv          station metadata
     |       |
     |       \---hex
-    |               20250416_cast1.hex
-    |               20250416_cast2.hex
+    |               20260516_cast1.hex
+    |               20260516_cast2.hex
     |               ... (etc)
     +---logs
     +---processed
     \---scripts
         +---linux_mac
-        |       ctd_build.sh              (generic; takes <cruise_id>)
-        |       ctd_build_baja2025.sh     (wrapper around ctd_build.sh baja2025)
+        |       ctd_build.sh                     (generic; takes <cruise_id>)
+        |       ctd_build_all.sh                 (builds every cruise under cruises/)
+        |       ctd_build_2025_Baja.sh           (wrapper around ctd_build.sh 2025_Baja)
+        |       ctd_build_2025_MontereyBay.sh    (wrapper for 2025_MontereyBay)
+        |       ctd_build_2026_MontereyBay.sh    (wrapper for 2026_MontereyBay)
+        |       ctd_build_2026_PNW.sh            (wrapper for 2026_PNW)
         |       ctd_dashboard.sh
         |
         \---windows
-                ctd_build.bat             (generic; takes <cruise_id>)
-                ctd_build_baja2025.bat    (wrapper around ctd_build.bat baja2025)
+                ctd_build.bat                    (generic; takes <cruise_id>)
+                ctd_build_all.bat                (builds every cruise under cruises\)
+                ctd_build_2025_Baja.bat          (wrapper around ctd_build.bat 2025_Baja)
+                ctd_build_2025_MontereyBay.bat   (wrapper for 2025_MontereyBay)
+                ctd_build_2026_MontereyBay.bat   (wrapper for 2026_MontereyBay)
+                ctd_build_2026_PNW.bat           (wrapper for 2026_PNW)
                 ctd_dashboard.bat
+
+## Cruises
+
+| Cruise ID | Dates | Casts | calibration.xmlcon | Notes |
+|---|---|---|---|---|
+| `2025_Baja` | Apr 16 - May 6, 2025 | 26 | Jan 2026 master config (SBE19plus V2 S/N 8289; pH cal 02-Feb-26) | |
+| `2025_MontereyBay` | Jul 14 - Sep 25, 2025 | 16 | Jan 2026 master config (same as Baja) | Cast 0051 is a deck test and always fails. Placeholder positions (`36-48.000N, 121-57.000W`) remain on 12 casts: `20250714_NPS_cast1`/`cast2`, `20250828_Menlo_0048`, `20250904_SoCo_0049`/`0050`, `20250909_SoCo_0051`, `20250916_Cabrillo_cast1`/`cast2`, `20250923_CSUMB`, `20250925_cabrillo_cast1`/`cast2`/`cast3`. Real positions must come from the cruise logs. |
+| `2026_MontereyBay` | Apr 1 - Aug 18, 2026 | 9 | June 2026 master config (pH cal 12-Jun-26) | The April 1 and April 17 casts use the June file, but its pH calibration dates from after those casts. They could be split out and run with the March master config (pH cal 30-Mar-26); only the pH slope and offset change. Positions missing for `20260417_cast1`, `20260417_cast2`, `20260730`; `sb_cast` 10 appears twice; `20260818_cast_null` always fails. |
+| `2026_PNW` | May 16 - Jun 5, 2026 | 5 | May 2026 master config (pH cal 02-May-26) | Latest calibration before both cast dates. `MIN_DEPTH_FLOOR = 1.0` because the casts are shallow. |
 
 ## File Descriptions
 
@@ -91,7 +138,7 @@ This has the advantage of not requiring root privileges, and it does not install
 * **ctd_holoviews.py** — Read-only Panel dashboard. Reactive widgets update all tabs when cruise or station selection changes.
 * **pyproject.toml** — Package definition. Enables `pip install -e .` to install the project and all dependencies in one step.
 * **config.toml** — Processing constants per cruise (CTM coefficients, bin size, QC thresholds, Wild Edit parameters). See schema below.
-* **calibration.xmlcon** — Sensor calibration file exported from SeaSoft. Contains T/C/P/O2/pH/CHL coefficients. This is the Jan 2026 calibration for CTD S/N 8289. Replace with the current xmlcon before each cruise.
+* **calibration.xmlcon** — Sensor calibration file exported from SeaSoft. Contains T/C/P/O2/pH/CHL coefficients. Use the xmlcon whose calibration dates match the cruise. The pH sensor was recalibrated several times in 2026, so choose the most recent calibration before the casts, and for a cruise spanning a recalibration run the casts in batches with the matching file.
 * **stations.csv** — Per-cast metadata: station name, lat/lon, cast numbers, start time.
 
 ## Prerequisites
@@ -138,7 +185,7 @@ The `-e` (editable) flag means source changes are picked up immediately without 
 | Column         | Description                                                            |
 |----------------|------------------------------------------------------------------------|
 | `file_key`     | Hex filename stem (e.g. `20250416_cast1` for `20250416_cast1.hex`)     |
-| `station_name` | Station identifier (e.g. `STA01`)                                      |
+| `station_name` | Station identifier (e.g. `9`, `SC1`, `MarrowstoneIsland`)              |
 | `lat`          | Latitude in `DD-MM.MMN` format (e.g. `23-30.00N`) or decimal degrees   |
 | `lon`          | Longitude in `DD-MM.MMW` format (e.g. `110-15.00W`) or decimal degrees |
 | `sb_cast`      | Sea-Bird instrument cast number                                        |
@@ -166,20 +213,27 @@ Run the build with the cruise ID as the argument:
 * **Windows:** `scripts\windows\ctd_build.bat <cruise_id>`
 * **Linux / macOS:** `./scripts/linux_mac/ctd_build.sh <cruise_id>`
 
+Each cruise also has a shortcut script with the cruise ID filled in, for example `scripts\windows\ctd_build_2026_PNW.bat`. To rebuild every cruise under `cruises/` one after another, run:
+
+* **Windows:** `scripts\windows\ctd_build_all.bat`
+* **Linux / macOS:** `./scripts/linux_mac/ctd_build_all.sh`
+
+Extra arguments (such as `--bin-size 0.5`) are passed on to `main.py`. A cruise's rows in the database are replaced each time it is built, so cruises renamed after an earlier build leave their old rows behind. To remove those, delete `processed/wf_ctd_eos80.duckdb` and rebuild.
+
 Alternatively, call `main.py` directly for full control. The following are example invocations — run only the one that fits your needs:
 
     # Basic build
-    python main.py baja2025
+    python main.py 2025_Baja
 
     # Override bin size or enable verbose logging
-    python main.py baja2025 --bin-size 0.5 --verbose
+    python main.py 2025_Baja --bin-size 0.5 --verbose
 
     # Write output to a custom DuckDB path
-    python main.py baja2025 --db /path/to/custom.duckdb
+    python main.py 2025_Baja --db /path/to/custom.duckdb
 
     # Override the xmlcon or hex directory locations
-    python main.py baja2025 --xmlcon /path/to/custom.xmlcon
-    python main.py baja2025 --hex-dir /path/to/hex_files/
+    python main.py 2025_Baja --xmlcon /path/to/custom.xmlcon
+    python main.py 2025_Baja --hex-dir /path/to/hex_files/
 
 ### CLI arguments
 
@@ -192,11 +246,13 @@ Alternatively, call `main.py` directly for full control. The following are examp
 | `--db`             | `processed/wf_ctd_eos80.duckdb`   | DuckDB output path                     |
 | `--verbose` / `-v` | Off                               | Enable DEBUG-level logging             |
 
+### Failed casts
+
+If a cast cannot be processed, the build logs one error line with the reason (for example, a cast that never gets deeper than `MIN_DEPTH_FLOOR`), skips that cast, and continues with the rest. The log ends with a list of failed casts and their reasons. Full tracebacks are written only with `--verbose`. Casts that processed successfully are still written to the database.
+
 *On macOS / Linux, make scripts executable once:*
 
-    chmod +x scripts/linux_mac/ctd_build.sh
-    chmod +x scripts/linux_mac/ctd_build_baja2025.sh
-    chmod +x scripts/linux_mac/ctd_dashboard.sh
+    chmod +x scripts/linux_mac/*.sh
 
 ## Running the Dashboard
 
@@ -234,14 +290,14 @@ Alternatively, call `main.py` directly for full control. The following are examp
 |-------------------------|-----------------------------------------------------------------------------------------------------|
 | `WILD_STD_PASS1`        | First-pass spike rejection threshold (standard deviations from block mean). Default 2.0.            |
 | `WILD_STD_PASS2`        | Second-pass spike rejection threshold (standard deviations). Default 20.0.                          |
-| `WILD_SCANS_PER_BLOCK`  | Number of scans per statistics block. Default 100 (25 s at 4 Hz).                                   |
+| `WILD_SCANS_PER_BLOCK`  | Number of scans per statistics block. Default 100 (25 s at 4 Hz). A cast with fewer scans left after Loop Edit is treated as one block. |
 | `WILD_DISTANCE_TO_MEAN` | Minimum absolute distance from block mean before a scan can be flagged (0 = no floor). Default 0.0. |
 
 ### Soak Detection Parameters
 
 | Parameter           | Description                                                                                |
 |---------------------|--------------------------------------------------------------------------------------------|
-| `MIN_DEPTH_FLOOR`   | Minimum depth (m) before soak detection begins. Default 10.0.                              |
+| `MIN_DEPTH_FLOOR`   | Minimum depth before soak detection begins, and the deepest point at which Loop Edit may start the downcast. Default 10.0. Must be less than the cast's maximum depth, or the cast fails with an error; lower it for shallow casts. |
 | `LOOP_MIN_VELOCITY` | Minimum descent velocity (m/s) for soak detection and loop edit. Default 0.25.             |
 | `SOAK_WINDOW_SIZE`  | Consecutive samples that must satisfy descent criteria to end the soak period. Default 20. |
 
