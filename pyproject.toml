@@ -11,7 +11,7 @@ authors = [
 # Core runtime dependencies.
 # seabirdscientific is available on PyPI (supports Python 3.9–3.12).
 dependencies = [
-    "seabirdscientific>=2.7.8",
+    "seabirdscientific==2.7.8",
     "duckdb>=1.5.0",
     "gsw>=3.6.0",
     "numpy>=2.0.0",
