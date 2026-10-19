@@ -9,21 +9,23 @@ authors = [
 ]
 
 # Core runtime dependencies.
-# seabirdscientific is available on PyPI (supports Python 3.9–3.12).
+# Versions match the environment the cruises were processed with (Python 3.12.10).
+# Processing libraries are pinned exactly because results depend on them.
+# seabirdscientific 3.x is a breaking rewrite (xarray Datasets); stay on 2.x.
 dependencies = [
-    "seabirdscientific>=2.7.8",
-    "duckdb>=1.5.0",
-    "gsw>=3.6.0",
-    "numpy>=2.0.0",
-    "pandas>=3.0.0",
-    "scipy>=1.10.0",
-    # Visualization & geospatial (required by ctd_holoviews.py)
-    "bokeh>=3.3.0",
-    "cartopy>=0.22.0",
-    "geoviews>=1.10.0",
-    "holoviews>=1.17.0",
-    "hvplot>=0.9.0",
-    "panel>=1.3.0",
+    "seabirdscientific==2.7.8",
+    "gsw==3.6.23",
+    "numpy==2.5.0",
+    "pandas==3.0.3",
+    "scipy==1.18.0",
+    "duckdb==1.5.4",
+    # Visualization & geospatial (required by ctd_holoviews.py): compatible patch updates
+    "bokeh~=3.9.1",
+    "cartopy~=0.25.0",
+    "geoviews~=1.15.1",
+    "holoviews~=1.23.1",
+    "hvplot~=0.12.2",
+    "panel~=1.9.3",
 ]
 
 [build-system]
