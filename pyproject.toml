@@ -26,6 +26,8 @@ dependencies = [
     "holoviews~=1.23.1",
     "hvplot~=0.12.2",
     "panel~=1.9.3",
+    "pyproj==3.7.2",
+    "shapely==2.1.2",
 ]
 
 [build-system]
