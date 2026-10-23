@@ -143,6 +143,8 @@ This has the advantage of not requiring root privileges, and it does not install
 
 ## Prerequisites
 
+**Git** must be installed to download the software from GitHub (`git clone`). Download it from [git-scm.com](https://git-scm.com/downloads) and confirm with `git --version`.
+
 Python 3.12 is required (see above). The **Sea-Bird Scientific Python Toolkit** is declared as a dependency in `pyproject.toml` and is installed automatically from PyPI when you run `pip install -e .` — no manual download required.
 
 ## Getting Started
@@ -206,6 +208,10 @@ You should see `(.venv)` at the start of your prompt.
     cd /path/to/westernflyer_cruise_ctd
     source .venv/bin/activate
 
+Make the scripts executable once (first time only):
+
+    chmod +x scripts/linux_mac/*.sh
+
 ---
 
 Run the build with the cruise ID as the argument:
@@ -249,10 +255,6 @@ Alternatively, call `main.py` directly for full control. The following are examp
 ### Failed casts
 
 If a cast cannot be processed, the build logs one error line with the reason (for example, a cast that never gets deeper than `MIN_DEPTH_FLOOR`), skips that cast, and continues with the rest. The log ends with a list of failed casts and their reasons. Full tracebacks are written only with `--verbose`. Casts that processed successfully are still written to the database.
-
-*On macOS / Linux, make scripts executable once:*
-
-    chmod +x scripts/linux_mac/*.sh
 
 ## Running the Dashboard
 
