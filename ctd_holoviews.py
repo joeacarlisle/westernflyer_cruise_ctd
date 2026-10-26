@@ -12,13 +12,63 @@ import re
 from io import BytesIO
 from scipy.interpolate import griddata
 from holoviews.operation import contours as hv_contours
-from bokeh.models import HoverTool, ColumnDataSource, LinearAxis, Range1d
+from bokeh.models import HoverTool, ColumnDataSource, LinearAxis, Range1d, CustomJS
 from bokeh.plotting import figure
 
 # 1. ENGINE INITIALIZATION
 pn.extension('tabulator')
 hv.extension('bokeh')
 gv.extension('bokeh')
+
+# 2b. EXPORT STYLING
+def _white_figure(fig):
+    """Opaque white figure, so exported PNGs have no transparent (checkerboard) area."""
+    fig.background_fill_color = 'white'
+    fig.border_fill_color = 'white'
+    # The dashboard theme sets border_fill_alpha = 0 (transparent).  Bokeh does not send a property that
+    # equals its default (1.0), so the theme would win; 0.999 is sent and still exports fully opaque.
+    fig.background_fill_alpha = 0.999
+    fig.border_fill_alpha = 0.999
+    fig.outline_line_color = '#888888'
+
+
+def _white_background(plot, element):
+    """HoloViews hook: opaque white figure with dark labels and title."""
+    fig = plot.state
+    _white_figure(fig)
+    for ax in list(fig.xaxis) + list(fig.yaxis):
+        ax.axis_label_text_color = '#222222'
+        ax.major_label_text_color = '#222222'
+    if fig.title is not None:
+        fig.title.text_color = '#222222'
+
+
+# BokehJS paints the white backing of a multi-plot (grid) export without the browser's display-scaling
+# factor, so at 125% Windows scaling only the top-left 80% of the PNG is filled and the toolbar corner
+# exports transparent.  This one-time patch makes grid exports paint white behind everything.
+_WHITE_EXPORT_JS = """
+const M = Bokeh.Models.get('GridPlot');
+const V = M && M.prototype.default_view;
+if (V && !V.prototype.__white_export) {
+  V.prototype.__white_export = true;
+  const orig = V.prototype.export;
+  V.prototype.export = function (...args) {
+    const out = orig.apply(this, args);
+    try {
+      const c = out.canvas, ctx = out.ctx;
+      if (c instanceof HTMLCanvasElement) {
+        ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.fillStyle = 'white'; ctx.fillRect(0, 0, c.width, c.height); ctx.restore();
+      }
+    } catch (e) {}
+    return out;
+  };
+}
+"""
+if pn.state.curdoc is not None:
+    pn.state.curdoc.js_on_event('document_ready', CustomJS(code=_WHITE_EXPORT_JS))
+
 
 # 2. DATABASE CONNECTION
 BASE_DIR = pathlib.Path(__file__).resolve().parent
@@ -125,7 +175,8 @@ def view_profiles(target_cruise, target_id, z_range, filter_qc, show_soak):
     df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
     if df.empty: return pn.pane.Alert("Data Pending...")
     v_opts = dict(invert_yaxis=True, height=550, show_grid=True, xaxis='top', tools=['hover'], xticks=3, padding=0.05,
-                  line_width=2.5, fontsize={'labels': '8pt', 'xticks': '7pt', 'yticks': '7pt', 'legend': '7pt'})
+                  line_width=2.5, fontsize={'labels': '8pt', 'xticks': '7pt', 'yticks': '7pt', 'legend': '7pt'},
+                  hooks=[_white_background])
 
     p1 = hv.Curve(df, 'theta', 'depth_m', label='Pot. Temp').opts(**v_opts, color='cyan', width=175, xlabel='theta (°C)')
     p6 = hv.Curve(df, 'in_situ_temp', 'depth_m', label='In-Situ Temp').opts(**v_opts, color='blue', width=140, yaxis=None, xlabel='T (°C)')
@@ -134,7 +185,14 @@ def view_profiles(target_cruise, target_id, z_range, filter_qc, show_soak):
     p4 = hv.Curve(df, 'ph_final', 'depth_m', label='pH').opts(**v_opts, color='goldenrod', width=125, yaxis=None, xlabel='pH')
     p5 = hv.Curve(df, 'chl_final', 'depth_m', label='Chl').opts(**v_opts, color='green', width=125, yaxis=None, xlabel='Chl (mg/m³)')
 
-    return (p1 + p6 + p2 + p3 + p4 + p5).cols(6).opts(shared_axes=True, merge_tools=True)
+    layout = (p1 + p6 + p2 + p3 + p4 + p5).cols(6).opts(shared_axes=True, merge_tools=True)
+    # The merged toolbar sits in the grid's own header strip, outside every figure, so the per-figure hook
+    # cannot reach it and the exported PNG shows a transparent (checkerboard) header.  The grid's export
+    # fills with its CSS background, so render to a bokeh GridPlot and give that a white background.
+    grid = hv.render(layout, backend='bokeh')
+    grid.background = 'white'
+    grid.toolbar.styles = {'background-color': 'white'}   # the toolbar box (upper right) too
+    return pn.pane.Bokeh(grid)
 
 @pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
 def view_multi_profile(target_cruise, target_id, z_range, filter_qc, show_soak):
@@ -219,6 +277,7 @@ def view_multi_profile(target_cruise, target_id, z_range, filter_qc, show_soak):
     p.legend.label_text_font_size = "8pt"
     p.legend.background_fill_alpha = 0.5
 
+    _white_figure(p)
     return p
 
 @pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
@@ -226,7 +285,8 @@ def view_ts_analysis(target_cruise, target_id, z_range, filter_qc, show_soak):
     df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
     if df.empty: return pn.pane.Alert("Data Null")
     return hv.Points(df, ['SP', 'theta'], ['depth_m', 'sigma']).opts(
-        color='depth_m', cmap='Viridis_r', width=600, height=500, colorbar=True, title="T-S Analysis (EOS-80)", tools=['hover']
+        color='depth_m', cmap='Viridis_r', width=600, height=500, colorbar=True, title="T-S Analysis (EOS-80)", tools=['hover'],
+        hooks=[_white_background]
     )
 
 @pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
@@ -237,20 +297,20 @@ def view_aou(target_cruise, target_id, z_range, filter_qc, show_soak):
     sat_l = hv.Curve(df, 'sat_o2', 'depth_m', label='Sat. Cap').opts(**opts, color='black', line_dash='dashed')
     o2_l = hv.Curve(df, 'o2_final', 'depth_m', label='Observed').opts(**opts, color='cyan')
     fill = hv.Area(df, ('sat_o2', 'o2_final'), 'depth_m', label='AOU').opts(**opts, color='orange', alpha=0.3)
-    return (fill * sat_l * o2_l).opts(title="Apparent Oxygen Utilization (AOU)")
+    return (fill * sat_l * o2_l).opts(title="Apparent Oxygen Utilization (AOU)", hooks=[_white_background])
 
 @pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
 def view_stability(target_cruise, target_id, z_range, filter_qc, show_soak):
     df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
     if df.empty: return pn.pane.Alert("No Data")
     surf = df['sigma'].iloc[0]
-    opts = dict(invert_yaxis=True, height=500, width=400, tools=['hover'])
+    opts = dict(invert_yaxis=True, height=500, width=400, tools=['hover'], hooks=[_white_background])
     density_curve = hv.Curve(df, 'sigma', 'depth_m', label='Density').opts(**opts, color='blue')
     # Guard against fully-mixed profiles: only draw MLD line if threshold is crossed
     over_threshold = (df['sigma'] - surf) > 0.03
     if over_threshold.any():
         mld_v = df.loc[over_threshold.idxmax(), 'depth_m']
-        density_panel = density_curve * hv.HLine(mld_v).opts(color='red')
+        density_panel = (density_curve * hv.HLine(mld_v).opts(color='red')).opts(hooks=[_white_background])
     else:
         density_panel = density_curve
     return pn.Row(density_panel,
@@ -260,14 +320,14 @@ def view_stability(target_cruise, target_id, z_range, filter_qc, show_soak):
 def view_metabolic_index(target_cruise, target_id, z_range, filter_qc, show_soak):
     df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
     if df.empty: return pn.pane.Alert("No Data")
-    return (hv.Curve(df, 'phi', 'depth_m', label='Φ').opts(color='#e67e22', invert_yaxis=True, height=550, width=500, tools=['hover']) * hv.VLine(1.0).opts(color='red', line_dash='dashed'))
+    return (hv.Curve(df, 'phi', 'depth_m', label='Φ').opts(color='#e67e22', invert_yaxis=True, height=550, width=500, tools=['hover']) * hv.VLine(1.0).opts(color='red', line_dash='dashed')).opts(hooks=[_white_background])
 
 @pn.depends(cruise_select, station_select)
 def view_map_geolocation(target_cruise, target_id):
     cruise_coords = con.execute(f"SELECT DISTINCT station_id, lat, lon FROM {TABLE_NAME} WHERE cruise_id = ?", (target_cruise,)).df()
     pts = gv.Points(cruise_coords, ['lon', 'lat'], vdims=['station_id'], crs=ccrs.PlateCarree()).opts(size=8, color='#f1c40f', alpha=0.6, tools=['hover'])
     sel = gv.Points(cruise_coords[cruise_coords['station_id'] == target_id], ['lon', 'lat'], crs=ccrs.PlateCarree()).opts(size=18, color='red', marker='circle', line_color='white')
-    return (gvts.EsriOceanBase * gvts.EsriOceanReference * pts * sel).opts(width=900, height=600, title="Geolocation")
+    return (gvts.EsriOceanBase * gvts.EsriOceanReference * pts * sel).opts(width=900, height=600, title="Geolocation", hooks=[_white_background])
 
 # ── Section plot helpers ───────────────────────────────────────────────────────
 def _haversine_km(lat1, lon1, lat2, lon2):
@@ -420,7 +480,7 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label):
         ])],
     )
 
-    return (img * iso * sta_lines * sta_hover).opts(show_grid=False)
+    return (img * iso * sta_lines * sta_hover).opts(show_grid=False, hooks=[_white_background])
 
 view_section = pn.Column(
     pn.Row(section_var_select, margin=(8, 0, 4, 10)),
@@ -456,7 +516,7 @@ tabs = pn.Tabs(
 )
 
 dashboard = pn.template.FastListTemplate(
-    title="Western Flyer - CTD (SBE 19plus)",
+    title="Western Flyer - CTD (SBE 19plus V2)",
     sidebar=[cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, pn.pane.Markdown("---"), csv_button],
     main=[tabs], accent_base_color="#00f2ff", header_background="#1a1a1a"
 )
