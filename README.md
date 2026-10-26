@@ -261,6 +261,8 @@ If a cast cannot be processed, the build logs one error line with the reason (fo
 * **Windows:** `scripts\windows\ctd_dashboard.bat`
 * **Linux / macOS:** `./scripts/linux_mac/ctd_dashboard.sh`
 
+The CTD dashboard starts on port 5006 (Panel's default) at `http://localhost:5006`. The flow-through dashboard in [westernflyer_cruise_flowthru](../westernflyer_cruise_flowthru) starts on port 5007, so the two applications can run side by side.
+
 ## config.toml Schema
 
 `config.toml` uses TOML format with named sections (e.g. `[processing]`, `[wild_edit]`). The cruise ID is **not** stored here — it comes from the directory name.
