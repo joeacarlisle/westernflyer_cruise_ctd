@@ -13,7 +13,7 @@ The Western Flyer CTD codebase is a modular, automated processing pipeline desig
 * **Automated EOS-80 Physics Pipeline:** Core oceanographic correction logic runs in this fixed order: soak elimination → cell-thermal-mass (CTM) conductivity correction → O2 tau-shift alignment → loop edit → EOS-80 physics (Practical Salinity from CTM-corrected conductivity via PSS-78, then potential temperature and density) → chlorophyll calibration (`apply_chl_calibration`) → Wild Edit spike removal → velocity-based QC → downcast extraction → 1 m bin averaging.
 * **Atomic, Idempotent Storage:** Processed data is managed via DuckDB. Per-cruise records are replaced atomically inside a single transaction. A `build_metadata` table records the SHA-256 of the `.xmlcon` file and the git commit for every build, so every row in `ctd_data` is traceable to the exact calibration that produced it.
 * **Per-Build Audit Logging:** Each invocation writes a fresh, timestamped log file (`logs/wf_build_<cruise>_<timestamp>.log`).
-* **Interactive Dashboard Suite:** A built-in visualization suite powered by the HoloViz ecosystem (Panel, HoloViews, Bokeh) renders interactive dashboards. Supports multi-variable vertical profiling, T-S analysis, vertical section plots with isopycnal (σθ) contours, AOU, MLD/stability, the metabolic index Φ, geolocation, and tabular export.
+* **Interactive Dashboard Suite:** A built-in visualization suite powered by the HoloViz ecosystem (Panel, HoloViews, Bokeh) renders interactive dashboards. Supports multi-variable vertical profiling, T-S analysis, vertical section plots with isopycnal (σθ) contours, AOU, MLD/stability, the metabolic index Φ, an ocean (bathymetry) map of the station positions, and tabular export.
 
 ## Root Directory Notes
 
@@ -24,32 +24,32 @@ To avoid Windows permission issues, place the root folder inside your Windows us
 
 ## Python Installation Requirements
 
-This project requires **Python 3.12**.
+This project requires **Python 3.13**.
 
 ### Windows
 When installing, the installer will ask: "Add Python to PATH?" **Select NO.**
 
-* **Typical path:** `C:\Users\<your_username>\AppData\Local\Programs\Python\Python312\`
+* **Typical path:** `C:\Users\<your_username>\AppData\Local\Programs\Python\Python313\`
 
 ### macOS (Homebrew)
-    brew install python@3.12
+    brew install python@3.13
 
 ### Linux (Ubuntu / Debian) using apt install
     sudo add-apt-repository ppa:deadsnakes/ppa
     sudo apt update
-    sudo apt install python3.12 python3.12-venv
+    sudo apt install python3.13 python3.13-venv
 
 ### Linux (Ubuntu / Debian) using pyenv
 
-This has the advantage of not requiring root privileges, and it does not install Python 3.12 system wide.
+This has the advantage of not requiring root privileges, and it does not install Python 3.13 system wide.
 
     # Install pyenv:
     curl -fsSL https://pyenv.run | bash
-    # Install Python 3.12:
-    pyenv install 3.12
-    # Set Python 3.12 as the global default:
-    pyenv global 3.12
-    
+    # Install Python 3.13:
+    pyenv install 3.13
+    # Set Python 3.13 as the global default:
+    pyenv global 3.13
+
 ## Project Structure
 
 *`logs/` and `processed/` are created automatically on first run.*
@@ -145,14 +145,14 @@ This has the advantage of not requiring root privileges, and it does not install
 
 **Git** must be installed to download the software from GitHub (`git clone`). Download it from [git-scm.com](https://git-scm.com/downloads) and confirm with `git --version`.
 
-Python 3.12 is required (see above). The **Sea-Bird Scientific Python Toolkit** is declared as a dependency in `pyproject.toml` and is installed automatically from PyPI when you run `pip install -e .` — no manual download required.
+Python 3.13 is required (see above). The **Sea-Bird Scientific Python Toolkit** is declared as a dependency in `pyproject.toml` and is installed automatically from PyPI when you run `pip install -e .` — no manual download required.
 
 ## Getting Started
 
     git clone https://github.com/joeacarlisle/westernflyer_cruise_ctd.git
     cd westernflyer_cruise_ctd
 
-Then follow the **Prerequisites** and **Setup** sections below to install Python 3.12 and the project dependencies.
+Then follow the **Prerequisites** and **Setup** sections below to install Python 3.13 and the project dependencies.
 
 ## Setup: Virtual Environment and Installation
 
@@ -160,13 +160,13 @@ Then follow the **Prerequisites** and **Setup** sections below to install Python
 
 ### Windows (Command Prompt)
 
-    "C:\Users\<your_username>\AppData\Local\Programs\Python\Python312\python.exe" -m venv .venv
+    "C:\Users\<your_username>\AppData\Local\Programs\Python\Python313\python.exe" -m venv .venv
     .venv\Scripts\activate
     pip install -e .
 
 ### macOS / Linux
 
-    python3.12 -m venv .venv
+    python3.13 -m venv .venv
     source .venv/bin/activate
     pip install -e .
 
@@ -263,6 +263,18 @@ If a cast cannot be processed, the build logs one error line with the reason (fo
 
 The CTD dashboard starts on port 5006 (Panel's default) at `http://localhost:5006`. The flow-through dashboard in [westernflyer_cruise_flowthru](../westernflyer_cruise_flowthru) starts on port 5007, so the two applications can run side by side.
 
+### Vertical Section tab
+
+The section is a vertical slice through the stations you choose, drawn in the style of Ocean Data View. Controls above the plot:
+
+* **Stations in section:** a list of the cruise's stations. Select the ones that lie along one line (hold Ctrl or Shift for several); **All** and **None** set them all. Choosing a new cruise selects every station again. At least two are needed.
+* **X axis:** *Distance along section (km)* (default) projects the chosen stations onto the straight line that fits them best, measured from the southern (or western) end. *Longitude* and *Latitude* order the stations by that coordinate. *Time (days since first station)* spaces them by when they were sampled. *Distance Along Track (km)* is the earlier view: stations in time order with the distances between consecutive stations added up.
+* **Blank gaps wider than (km):** the shading is not drawn between two neighbouring stations that are farther apart than this (default 100 km). Set it to 0 to grid across every gap.
+* **Section map (right of the plot):** shows every station of the cruise in grey, the chosen stations in orange, the first station of the section in green, and the line joining the chosen stations in the order the section draws them in red. It uses the same Esri Ocean Base map as the Map tab (internet needed) and updates when you change the stations or the X axis.
+* Triangles and dashed lines mark the stations, and the black contours are density (σθ) every 0.5 kg/m³.
+
+A cruise that is not one transect (for example 2025_Baja, which visits several areas) gives a misleading section if every station is used, because the colours between distant stations are interpolated across water that was not sampled. Select only stations on one line.
+
 ## config.toml Schema
 
 `config.toml` uses TOML format with named sections (e.g. `[processing]`, `[wild_edit]`). The cruise ID is **not** stored here — it comes from the directory name.
@@ -311,6 +323,10 @@ The CTD dashboard starts on port 5006 (Panel's default) at `http://localhost:500
 |-------------------|---------------------------------------------------------------------------------------|
 | `QC_VELOCITY`     | Descent speed (m/s) above which a scan is flagged QC=3. Default 1.2.                  |
 | `BIN_SIZE_METERS` | Vertical bin resolution in the database (m). Default 1.0. Override with `--bin-size`. |
+
+## Dashboard stops responding
+
+The dashboard stops responding after 15 minutes of inactivity and needs to be refreshed (press F5 or reload the page). For Windows this is the browser's sleeping-tabs setting: Edge puts a tab that has been inactive for 15 minutes to sleep, which cuts its link to the dashboard server. To stop it, add the dashboard address to Settings > System and performance > Performance > "Always keep these sites active" (for example `localhost`), or turn off "Automatically put tabs to sleep".
 
 ## Contact
 

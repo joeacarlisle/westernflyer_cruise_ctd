@@ -69,5 +69,5 @@ When an AI agent (like Junie or others) interacts with this repository, it shoul
 - **Database:** Verify output in `processed/wf_ctd_eos80.duckdb`. The `build_metadata` table should be checked to confirm successful persistence and provenance.
 
 ### Dependencies
-- This project strictly requires **Python 3.12**.
+- This project requires **Python 3.13**.
 - Other dependencies are listed in `pyproject.toml`.

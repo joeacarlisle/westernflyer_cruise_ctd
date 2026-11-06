@@ -43,6 +43,27 @@ def _white_background(plot, element):
         fig.title.text_color = '#222222'
 
 
+def _white_border(plot, element):
+    """Opaque white border for exported PNGs, keeping the plot area's own colour (used for the map)."""
+    fig = plot.state
+    fig.border_fill_color = 'white'
+    fig.border_fill_alpha = 0.999        # the theme sets 0; 0.999 is sent and still exports opaque
+
+
+def _limit_map_zoom(plot, element):
+    """Ocean Base has tiles only to about zoom 10 in many regions; stop there instead of showing blank tiles."""
+    for r in plot.state.renderers:
+        src = getattr(r, 'tile_source', None)
+        if src is not None:
+            src.max_zoom = 10
+
+
+def _to_mercator(lon, lat):
+    """WGS84 degrees -> Web Mercator metres (the projection of the web map tiles)."""
+    r = 6378137.0
+    return np.radians(lon) * r, np.log(np.tan(np.pi / 4 + np.radians(lat) / 2)) * r
+
+
 # BokehJS paints the white backing of a multi-plot (grid) export without the browser's display-scaling
 # factor, so at 125% Windows scaling only the top-left 80% of the PNG is filled and the toolbar corner
 # exports transparent.  This one-time patch makes grid exports paint white behind everything.
@@ -322,12 +343,34 @@ def view_metabolic_index(target_cruise, target_id, z_range, filter_qc, show_soak
     if df.empty: return pn.pane.Alert("No Data")
     return (hv.Curve(df, 'phi', 'depth_m', label='Φ').opts(color='#e67e22', invert_yaxis=True, height=550, width=500, tools=['hover']) * hv.VLine(1.0).opts(color='red', line_dash='dashed')).opts(hooks=[_white_background])
 
+STATION_COLORS = {'selected station': '#ff1a1a', 'other stations': '#ffb000'}
+
+
 @pn.depends(cruise_select, station_select)
 def view_map_geolocation(target_cruise, target_id):
-    cruise_coords = con.execute(f"SELECT DISTINCT station_id, lat, lon FROM {TABLE_NAME} WHERE cruise_id = ?", (target_cruise,)).df()
-    pts = gv.Points(cruise_coords, ['lon', 'lat'], vdims=['station_id'], crs=ccrs.PlateCarree()).opts(size=8, color='#f1c40f', alpha=0.6, tools=['hover'])
-    sel = gv.Points(cruise_coords[cruise_coords['station_id'] == target_id], ['lon', 'lat'], crs=ccrs.PlateCarree()).opts(size=18, color='red', marker='circle', line_color='white')
-    return (gvts.EsriOceanBase * gvts.EsriOceanReference * pts * sel).opts(width=900, height=600, title="Geolocation", hooks=[_white_background])
+    """Station positions on the Esri Ocean Base map: the selected station in red, the others in amber."""
+    st = con.execute(f"SELECT station_id, AVG(lat) AS lat, AVG(lon) AS lon FROM {TABLE_NAME} "
+                     "WHERE cruise_id = ? AND lat IS NOT NULL AND lon IS NOT NULL GROUP BY station_id", (target_cruise,)).df()
+    if st.empty:
+        return pn.pane.Alert('No station positions for this cruise.', alert_type='warning')
+    st['x'], st['y'] = _to_mercator(st['lon'].to_numpy(float), st['lat'].to_numpy(float))
+    st['status'] = np.where(st['station_id'] == target_id, 'selected station', 'other stations')
+    st = st.sort_values('status', key=lambda c: c.map({'other stations': 0, 'selected station': 1})).reset_index(drop=True)   # selected drawn last
+    pts = hv.Points(st, kdims=['x', 'y'], vdims=['station_id', 'lat', 'lon', 'status']).opts(
+        color='status', cmap=STATION_COLORS, size=13, line_color='white', line_width=1.5,
+        tools=['hover'], show_legend=True, legend_position='bottom_left')
+    # Start with a sensible view: all stations, and at least about 80 km around them so that a single
+    # station does not zoom in beyond the imagery ("Map data not yet available").
+    xs, ys = st['x'].to_numpy(), st['y'].to_numpy()
+    half_min = 80000.0 / np.cos(np.radians(float(st['lat'].mean())))
+    cx, cy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
+    hx, hy = max((xs.max() - xs.min()) * 0.6, half_min), max((ys.max() - ys.min()) * 0.6, half_min)
+    plot = (gvts.EsriOceanBase * gvts.EsriOceanReference * pts).opts(
+        responsive=True, min_height=620, xaxis=None, yaxis=None, active_tools=['wheel_zoom'],
+        xlim=(cx - hx, cx + hx), ylim=(cy - hy, cy + hy),
+        bgcolor='#0b1a2b',   # dark backdrop, shown if the map tiles cannot load
+        title='Station positions', hooks=[_white_border, _limit_map_zoom])
+    return pn.pane.HoloViews(plot, sizing_mode='stretch_both')
 
 # ── Section plot helpers ───────────────────────────────────────────────────────
 def _haversine_km(lat1, lon1, lat2, lon2):
@@ -356,7 +399,75 @@ section_var_select = pn.widgets.Select(
     width=230,
 )
 
-def _section_impl(target_cruise, z_range, filter_qc, section_var_label):
+# Section geometry, in the spirit of Ocean Data View: choose the stations, the x axis, and how far to grid across gaps.
+_SECTION_AXES = {
+    'Distance along section (km)':       'distance',   # stations projected onto the best-fit line through them
+    'Longitude (°)':                     'lon',
+    'Latitude (°)':                      'lat',
+    'Time (days since first station)':   'time',
+    'Distance Along Track (km)':         'track',      # the original view: time order, summed hops between stations
+}
+section_axis_select = pn.widgets.Select(name='X axis', options=list(_SECTION_AXES), value='Distance along section (km)', width=230)
+section_gap_slider = pn.widgets.IntSlider(name='Blank gaps wider than (km; 0 = off)', start=0, end=500, value=100, step=10, width=230)
+section_station_select = pn.widgets.MultiSelect(name='Stations in section', options=stations, value=list(stations), size=10, width=230)
+section_all_btn = pn.widgets.Button(name='All', width=70)
+section_none_btn = pn.widgets.Button(name='None', width=70)
+
+
+def _cruise_station_list(cruise):
+    ids = con.execute(f"SELECT DISTINCT station_id FROM {TABLE_NAME} WHERE cruise_id = ?", (cruise,)).df()['station_id'].tolist()
+    return sorted(ids, key=lambda x: int(re.findall(r'\d+', x)[-1]) if re.findall(r'\d+', x) else 0)
+
+
+def _section_stations_for_cruise(event):
+    ids = _cruise_station_list(event.new)
+    section_station_select.options = ids
+    section_station_select.value = list(ids)          # a new cruise starts with every station
+
+
+def _section_select_all(event):
+    section_station_select.value = list(section_station_select.options)
+
+
+def _section_select_none(event):
+    section_station_select.value = []
+
+
+cruise_select.param.watch(_section_stations_for_cruise, 'value')
+section_all_btn.on_click(_section_select_all)
+section_none_btn.on_click(_section_select_none)
+
+
+def _section_positions(sta, mode):
+    """x position of each station (rows of ``sta``: lat, lon, t) for one x-axis mode, in that axis's units."""
+    if mode == 'lon':
+        return sta['lon'].astype(float)
+    if mode == 'lat':
+        return sta['lat'].astype(float)
+    if mode == 'time':
+        t = pd.to_datetime(sta['t'], utc=True, errors='coerce')
+        return (t - t.min()).dt.total_seconds() / 86400.0
+    if mode == 'track':                                # original behaviour: time order, summed hops between stations
+        ordered = sta.assign(_t=pd.to_datetime(sta['t'], utc=True, errors='coerce')).sort_values('_t')
+        lats, lons = ordered['lat'].to_numpy(float), ordered['lon'].to_numpy(float)
+        cum = np.zeros(len(ordered))
+        for i in range(1, len(ordered)):
+            cum[i] = cum[i - 1] + _haversine_km(lats[i - 1], lons[i - 1], lats[i], lons[i])
+        return pd.Series(cum, index=ordered.index)
+    # 'distance': project the stations onto the straight line that fits them best, measured from one end
+    lat0, lon0 = float(sta['lat'].mean()), float(sta['lon'].mean())
+    yk = (sta['lat'].to_numpy(float) - lat0) * 111.19
+    xk = (sta['lon'].to_numpy(float) - lon0) * 111.19 * np.cos(np.radians(lat0))
+    pts = np.column_stack([xk, yk])
+    _, _, vt = np.linalg.svd(pts - pts.mean(axis=0), full_matrices=False)
+    v = vt[0]
+    if (abs(v[1]) >= abs(v[0]) and v[1] < 0) or (abs(v[1]) < abs(v[0]) and v[0] < 0):
+        v = -v                                          # start at the southern end (or western end for an east-west line)
+    proj = pts @ v
+    return pd.Series(proj - proj.min(), index=sta.index)
+
+
+def _section_impl(target_cruise, z_range, filter_qc, section_var_label, chosen_stations, axis_label, gap_km):
     col, cmap, unit = _SECTION_VARS[section_var_label]
     qc_clause = "AND qc_flag < 3" if filter_qc else ""
     query = f"""
@@ -379,22 +490,33 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label):
     if col not in df.columns:
         return pn.pane.Alert(f"Column '{col}' not found in data.")
 
-    # Order stations chronologically along the cruise track
-    station_order = (
-        df.groupby('station_id')['time_iso'].min()
-        .sort_values().index.tolist()
-    )
+    # Keep only the stations chosen for this section (a stale list from another cruise means "all of them").
+    if not chosen_stations:
+        return pn.pane.Alert("Choose at least two stations for the section.", alert_type='warning')
+    chosen = df[df['station_id'].isin(chosen_stations)]
+    df = (chosen if not chosen.empty else df).copy()
+    if df['station_id'].nunique() < 2:
+        return pn.pane.Alert("Choose at least two stations for the section.", alert_type='warning')
 
-    # Cumulative along-track distance (km) for each station
-    sta_pos = df.groupby('station_id')[['lat', 'lon']].first().loc[station_order]
-    lats, lons = sta_pos['lat'].values, sta_pos['lon'].values
-    cum_dist = np.zeros(len(station_order))
-    for i in range(1, len(station_order)):
-        cum_dist[i] = cum_dist[i - 1] + _haversine_km(
-            lats[i - 1], lons[i - 1], lats[i], lons[i]
-        )
-    dist_map = dict(zip(station_order, cum_dist))
-    df['dist_km'] = df['station_id'].map(dist_map)
+    # Position of every station along the chosen x axis, and the order they fall in
+    mode = _SECTION_AXES[axis_label]
+    sta = df.groupby('station_id').agg(lat=('lat', 'first'), lon=('lon', 'first'), t=('time_iso', 'min'))
+    x_sta = _section_positions(sta, mode).dropna()
+    sta = sta.loc[x_sta.index]
+    if len(x_sta) < 2 or x_sta.nunique() < 2:
+        return pn.pane.Alert("These stations do not span a range on that x axis; choose another axis or more stations.",
+                             alert_type='warning')
+    station_order = x_sta.sort_values().index.tolist()
+    cum_dist = x_sta.loc[station_order].to_numpy(float)          # x position of each station, in order
+    df['dist_km'] = df['station_id'].map(x_sta.to_dict())
+
+    # Stretches between neighbouring stations that are too far apart to grid across
+    lats_o, lons_o = sta.loc[station_order, 'lat'].to_numpy(float), sta.loc[station_order, 'lon'].to_numpy(float)
+    gaps = []
+    if gap_km and gap_km > 0:
+        for i in range(len(station_order) - 1):
+            if _haversine_km(lats_o[i], lons_o[i], lats_o[i + 1], lons_o[i + 1]) > gap_km:
+                gaps.append((cum_dist[i], cum_dist[i + 1]))
 
     # Base (x, y) grid — shared by main variable and sigma
     x_all = df['dist_km'].values.astype(float)
@@ -413,7 +535,15 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label):
     xi = np.linspace(xm.min(), xm.max(), 300)
     yi = np.linspace(ym.min(), ym.max(), 200)
     Xi, Yi = np.meshgrid(xi, yi)
-    Zi = griddata((xm, ym), zm, (Xi, Yi), method='linear')
+    # Scale both axes to 0..1 for the triangulation, so a tiny range (degrees) is not squashed against metres.
+    sx, sy = max(float(np.ptp(xm)), 1e-9), max(float(np.ptp(ym)), 1e-9)
+    Zi = griddata((xm / sx, ym / sy), zm, (Xi / sx, Yi / sy), method='linear')
+
+    def _blank_gaps(Z):
+        for g0, g1 in gaps:
+            Z[:, (xi > g0) & (xi < g1)] = np.nan
+        return Z
+    Zi = _blank_gaps(Zi)
 
     vmin = np.nanpercentile(zm, 2)
     vmax = np.nanpercentile(zm, 98)
@@ -421,7 +551,7 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label):
 
     img = hv.Image(
         (xi, yi, Zi),
-        kdims=['Distance Along Track (km)', 'Depth (m)'],
+        kdims=[axis_label, 'Depth (m)'],
         vdims=[label],
     ).opts(
         cmap=cmap, colorbar=True, clim=(vmin, vmax),
@@ -434,9 +564,9 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label):
     # ── Isopycnal contours (σθ, every 0.5 kg/m³) ─────────────────────────────
     s_vals = df['sigma'].values.astype(float)
     s_mask = base_mask & ~np.isnan(s_vals)
-    Zi_sigma = griddata(
-        (x_all[s_mask], y_all[s_mask]), s_vals[s_mask], (Xi, Yi), method='linear'
-    )
+    Zi_sigma = _blank_gaps(griddata(
+        (x_all[s_mask] / sx, y_all[s_mask] / sy), s_vals[s_mask], (Xi / sx, Yi / sy), method='linear'
+    ))
     s_clean = Zi_sigma[~np.isnan(Zi_sigma)]
     if len(s_clean) > 0:
         lvl_min = np.ceil(s_clean.min() * 2) / 2
@@ -447,7 +577,7 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label):
 
     sigma_img = hv.Image(
         (xi, yi, Zi_sigma),
-        kdims=['Distance Along Track (km)', 'Depth (m)'],
+        kdims=[axis_label, 'Depth (m)'],
         vdims=['sigma'],
     )
     iso = hv_contours(sigma_img, levels=levels).opts(
@@ -465,26 +595,83 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label):
     marker_depth = yi.min() + (yi.max() - yi.min()) * 0.02
     sta_hover = hv.Points(
         pd.DataFrame({
-            'Distance Along Track (km)': cum_dist,
+            axis_label:                  cum_dist,
             'Depth (m)':                 np.full(len(station_order), marker_depth),
             'Station':                   [sta_names.get(s, s) for s in station_order],
         }),
-        kdims=['Distance Along Track (km)', 'Depth (m)'],
+        kdims=[axis_label, 'Depth (m)'],
         vdims=['Station'],
     ).opts(
         color='white', size=7, marker='triangle', show_legend=False,
         tools=[HoverTool(tooltips=[
             ('Station',                   '@{Station}'),
-            ('Distance Along Track (km)', '@{Distance Along Track (km)}'),
+            (axis_label,                  '@{' + axis_label + '}'),
             ('Depth (m)',                 '@{Depth (m)}'),
         ])],
     )
 
     return (img * iso * sta_lines * sta_hover).opts(show_grid=False, hooks=[_white_background])
 
+SECTION_MAP_COLORS = {'other stations': '#8a8a8a', 'in section': '#ffb000', 'section start': '#2ca02c'}
+SECTION_MAP_W, SECTION_MAP_H = 440, 520
+
+
+def _section_map_impl(target_cruise, chosen_stations, axis_label):
+    """Map of the section: every station of the cruise, the ones in the section, and the line joining them in section order."""
+    st = con.execute(f"SELECT station_id, MIN(lat) AS lat, MIN(lon) AS lon, MIN(time_iso) AS t FROM {TABLE_NAME} "
+                     "WHERE cruise_id = ? AND lat IS NOT NULL AND lon IS NOT NULL GROUP BY station_id",
+                     (target_cruise,)).df()
+    if st.empty:
+        return pn.pane.Alert('No station positions for this cruise.', alert_type='warning')
+    st = st.set_index('station_id')
+    chosen = [c for c in (chosen_stations or []) if c in st.index]
+    if chosen_stations and not chosen:
+        chosen = list(st.index)                       # a stale list from another cruise means "all of them", as in the section
+    order = []
+    if len(chosen) >= 2:
+        x_sta = _section_positions(st.loc[chosen], _SECTION_AXES[axis_label]).dropna()
+        if x_sta.nunique() >= 2:
+            order = x_sta.sort_values().index.tolist()    # the order the section draws them in
+    st['x'], st['y'] = _to_mercator(st['lon'].to_numpy(float), st['lat'].to_numpy(float))
+    st['status'] = 'other stations'
+    st.loc[chosen, 'status'] = 'in section'
+    if order:
+        st.loc[order[0], 'status'] = 'section start'
+    st = st.sort_values('status', key=lambda c: c.map({'other stations': 0, 'in section': 1, 'section start': 2}))
+    pts = hv.Points(st.reset_index(), kdims=['x', 'y'], vdims=['station_id', 'lat', 'lon', 'status']).opts(
+        color='status', cmap=SECTION_MAP_COLORS, size=11, line_color='white', line_width=1.2,
+        tools=['hover'], show_legend=True, legend_position='bottom_left')
+    layers = gvts.EsriOceanBase * gvts.EsriOceanReference
+    if order:
+        line = st.loc[order, ['x', 'y']].to_numpy(float)
+        layers = layers * hv.Path([line]).opts(color='#d62728', line_width=2.5, show_legend=False)
+    layers = layers * pts
+    # Start view: the stations of the section (or of the cruise), padded, at least about 70 km across, same shape as the plot.
+    sel = st[st['status'] != 'other stations'] if (st['status'] != 'other stations').any() else st
+    xs, ys = sel['x'].to_numpy(), sel['y'].to_numpy()
+    half_min = 35000.0 / np.cos(np.radians(float(sel['lat'].mean())))
+    cx, cy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
+    hx, hy = max((xs.max() - xs.min()) * 0.65, half_min), max((ys.max() - ys.min()) * 0.65, half_min)
+    aspect = SECTION_MAP_W / SECTION_MAP_H
+    if hx / hy < aspect:
+        hx = hy * aspect
+    else:
+        hy = hx / aspect
+    plot = layers.opts(
+        width=SECTION_MAP_W, height=SECTION_MAP_H, xaxis=None, yaxis=None, active_tools=['wheel_zoom'],
+        xlim=(cx - hx, cx + hx), ylim=(cy - hy, cy + hy), bgcolor='#0b1a2b',
+        title='Section line (red) and stations', hooks=[_white_border, _limit_map_zoom])
+    return pn.pane.HoloViews(plot)
+
+
 view_section = pn.Column(
-    pn.Row(section_var_select, margin=(8, 0, 4, 10)),
-    pn.bind(_section_impl, cruise_select, depth_slider, qc_checkbox, section_var_select),
+    pn.Row(section_var_select, section_axis_select, section_gap_slider, margin=(8, 0, 4, 10)),
+    pn.Row(
+        pn.Column(section_station_select, pn.Row(section_all_btn, section_none_btn), margin=(0, 10, 0, 10)),
+        pn.bind(_section_impl, cruise_select, depth_slider, qc_checkbox, section_var_select,
+                section_station_select, section_axis_select, section_gap_slider),
+        pn.bind(_section_map_impl, cruise_select, section_station_select, section_axis_select),
+    ),
     sizing_mode='stretch_both',
 )
 
@@ -503,7 +690,7 @@ view_tabular_data = pn.Column(
 # 6. ASSEMBLY
 tabs = pn.Tabs(
     ("Cruise Summary", view_cruise_summary),
-    ("Geolocation", view_map_geolocation),
+    ("Map", view_map_geolocation),
     ("Vertical Section", view_section),
     ("Vertical Profiles", view_profiles),
     ("Multi-Axis Profile", view_multi_profile),
@@ -516,7 +703,7 @@ tabs = pn.Tabs(
 )
 
 dashboard = pn.template.FastListTemplate(
-    title="Western Flyer - CTD (SBE 19plus V2)",
+    title="R/V Western Flyer - CTD (SBE 19plus V2)",
     sidebar=[cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, pn.pane.Markdown("---"), csv_button],
     main=[tabs], accent_base_color="#00f2ff", header_background="#1a1a1a"
 )

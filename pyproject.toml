@@ -3,13 +3,13 @@ name = "wf-cruise-ctd"
 version = "1.0.0"
 description = "Western Flyer CTD processing pipeline — SBE 19plus V2 raw hex to EOS-80 DuckDB"
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.13,<3.14"
 authors = [
     {name = "Joe Carlisle", email = "joeacarlisle@gmail.com"},
 ]
 
 # Core runtime dependencies.
-# Versions match the environment the cruises were processed with (Python 3.12.10).
+# Versions match the environment the cruises were processed with (Python 3.13).
 # Processing libraries are pinned exactly because results depend on them.
 # seabirdscientific 3.x is a breaking rewrite (xarray Datasets); stay on 2.x.
 dependencies = [
