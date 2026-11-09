@@ -160,6 +160,23 @@ def _T():
     return f"(SELECT * FROM {TABLE_NAME} WHERE data_source = '{src}' AND cast_direction = '{dirn}')"
 
 
+def _soak_applies():
+    """The soak time is counted from each raw cast's first scan.  Processed files carry one cast start
+    time for every bin (no per-scan time), and SeaSoft has already removed the soak, so it cannot apply."""
+    return (not HAS_SOURCE) or source_select.value == 'raw'
+
+
+def _T_soak(soak_s):
+    """``_T()`` with the first ``soak_s`` seconds of every cast hidden (raw source only).
+
+    The cast start is the earliest time of any row of the cast, taken before any other filter."""
+    base = _T()
+    if not soak_s or soak_s <= 0 or not _soak_applies():
+        return base
+    return (f"(SELECT * EXCLUDE (_t0) FROM (SELECT *, min(time_iso) OVER (PARTITION BY cruise_id, station_id) AS _t0 "
+            f"FROM {base}) WHERE epoch(time_iso) - epoch(_t0) >= {int(soak_s)})")
+
+
 # Initialize default stations for the first cruise
 raw_stations = con.execute(f"SELECT DISTINCT station_id FROM {_T()} WHERE cruise_id = ?", (default_cruise,)).df()['station_id'].tolist()
 stations = sorted(raw_stations, key=lambda x: int(re.findall(r'\d+', x)[-1]) if re.findall(r'\d+', x) else 0)
@@ -170,6 +187,32 @@ station_select = pn.widgets.Select(name='Station ID', options=stations, value=st
 depth_slider = pn.widgets.RangeSlider(name='Depth Range (m)', start=0, end=1000, value=(0, 600), step=1.0)
 qc_checkbox = pn.widgets.Checkbox(name='Filter QC (Flag < 3)', value=False)
 soak_toggle = pn.widgets.Checkbox(name='Show Soak Data (Surface)', value=False)
+
+# Soak time to hide: hides the first N seconds of every raw cast (0 = hide nothing extra).  Data logged
+# before the pump has been running (conductivity cell not yet flushed, oxygen sensor not yet equilibrated)
+# is not trusted.  Sea-Bird's SBE 19plus V2 manual has no fixed soak time; its profiling example uses
+# PumpDelay=60, so 60 s is a sensible value to choose.
+SOAK_DEFAULT_S = 0
+soak_slider = pn.widgets.IntSlider(name='Soak time hidden (s)', start=0, end=600, step=5, value=SOAK_DEFAULT_S)
+
+
+def _soak_note(source, soak_s):
+    if not _soak_applies():
+        return "*Soak time is not applied: processed files have no per-scan time (SeaSoft already removed the soak).*"
+    if soak_s <= 0:
+        return "*No soak time hidden.*"
+    return f"*Hides the first {soak_s} s of every cast.*"
+
+
+soak_note = pn.pane.Markdown(pn.bind(_soak_note, source_select, soak_slider), margin=(0, 10, 5, 10))
+
+
+def _soak_enable(event=None):
+    soak_slider.disabled = not _soak_applies()
+
+
+if HAS_SOURCE:
+    source_select.param.watch(_soak_enable, 'value')
 
 # Callback to update stations when cruise changes
 def update_stations(event):
@@ -227,13 +270,13 @@ if HAS_SOURCE:
     direction_select.param.watch(_on_source_or_direction, 'value')
 
 # 4. DATA LOGIC
-@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
-def get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak):
+@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider)
+def get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s=0):
     if not target_id: return pd.DataFrame()
     qc_clause = "AND qc_flag < 3" if filter_qc else ""
     soak_clause = "" if show_soak else "AND is_soak = 0"
     query = f"""
-        SELECT * FROM {_T()}
+        SELECT * FROM {_T_soak(soak_s)}
         WHERE cruise_id = ?
         AND station_id = ?
         AND dbar_bin BETWEEN ? AND ?
@@ -263,7 +306,7 @@ def get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak):
     return df
 
 def download_csv():
-    df = get_clean_df(cruise_select.value, station_select.value, depth_slider.value, qc_checkbox.value, soak_toggle.value)
+    df = get_clean_df(cruise_select.value, station_select.value, depth_slider.value, qc_checkbox.value, soak_toggle.value, soak_slider.value)
     sio = BytesIO()
     df.to_csv(sio, index=False); sio.seek(0)
     return sio
@@ -290,9 +333,9 @@ view_cruise_summary = pn.Column(
     sizing_mode='stretch_both'
 )
 
-@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
-def view_profiles(target_cruise, target_id, z_range, filter_qc, show_soak):
-    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
+@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider)
+def view_profiles(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s):
+    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s)
     if df.empty: return pn.pane.Alert("Data Pending...")
     v_opts = dict(invert_yaxis=True, height=550, show_grid=True, xaxis='top', tools=['hover'], xticks=3, padding=0.05,
                   line_width=2.5, fontsize={'labels': '8pt', 'xticks': '7pt', 'yticks': '7pt', 'legend': '7pt'},
@@ -314,9 +357,9 @@ def view_profiles(target_cruise, target_id, z_range, filter_qc, show_soak):
     grid.toolbar.styles = {'background-color': 'white'}   # the toolbar box (upper right) too
     return pn.pane.Bokeh(grid)
 
-@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
-def view_multi_profile(target_cruise, target_id, z_range, filter_qc, show_soak):
-    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
+@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider)
+def view_multi_profile(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s):
+    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s)
     if df.empty: return pn.pane.Alert("Data Pending...")
 
     source = ColumnDataSource(df)
@@ -400,18 +443,18 @@ def view_multi_profile(target_cruise, target_id, z_range, filter_qc, show_soak):
     _white_figure(p)
     return p
 
-@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
-def view_ts_analysis(target_cruise, target_id, z_range, filter_qc, show_soak):
-    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
+@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider)
+def view_ts_analysis(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s):
+    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s)
     if df.empty: return pn.pane.Alert("Data Null")
     return hv.Points(df, ['SP', 'theta'], ['depth_m', 'sigma']).opts(
         color='depth_m', cmap='Viridis_r', width=600, height=500, colorbar=True, title="T-S Analysis (EOS-80)", tools=['hover'],
         hooks=[_white_background]
     )
 
-@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
-def view_aou(target_cruise, target_id, z_range, filter_qc, show_soak):
-    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
+@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider)
+def view_aou(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s):
+    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s)
     if df.empty: return pn.pane.Alert("No Data")
     opts = dict(invert_yaxis=True, height=550, width=600, show_grid=True, tools=['hover'])
     sat_l = hv.Curve(df, 'sat_o2', 'depth_m', label='Sat. Cap').opts(**opts, color='black', line_dash='dashed')
@@ -419,9 +462,9 @@ def view_aou(target_cruise, target_id, z_range, filter_qc, show_soak):
     fill = hv.Area(df, ('sat_o2', 'o2_final'), 'depth_m', label='AOU').opts(**opts, color='orange', alpha=0.3)
     return (fill * sat_l * o2_l).opts(title="Apparent Oxygen Utilization (AOU)", hooks=[_white_background])
 
-@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
-def view_stability(target_cruise, target_id, z_range, filter_qc, show_soak):
-    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
+@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider)
+def view_stability(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s):
+    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s)
     if df.empty: return pn.pane.Alert("No Data")
     surf = df['sigma'].iloc[0]
     opts = dict(invert_yaxis=True, height=500, width=400, tools=['hover'], hooks=[_white_background])
@@ -436,9 +479,9 @@ def view_stability(target_cruise, target_id, z_range, filter_qc, show_soak):
     return pn.Row(density_panel,
                   hv.Area(df, 'o2_final', 'depth_m', label='Oxygen Concentration').opts(**opts, color='magenta', alpha=0.2))
 
-@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
-def view_metabolic_index(target_cruise, target_id, z_range, filter_qc, show_soak):
-    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
+@pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider)
+def view_metabolic_index(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s):
+    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s)
     if df.empty: return pn.pane.Alert("No Data")
     return (hv.Curve(df, 'phi', 'depth_m', label='Φ').opts(color='#e67e22', invert_yaxis=True, height=550, width=500, tools=['hover']) * hv.VLine(1.0).opts(color='red', line_dash='dashed')).opts(hooks=[_white_background])
 
@@ -643,10 +686,10 @@ _SECTION_CACHE = collections.OrderedDict()
 _SECTION_CACHE_MAX = 4
 
 
-def _section_rows(cruise, stations, z0, z1, qc):
+def _section_rows(cruise, stations, z0, z1, qc, soak_s=0):
     """Rows (without soak) of the chosen stations, with sigma added.  ``stations`` is a sorted
     tuple, or None for every station of the cruise.  Treat the result as read-only."""
-    key = (_T(), cruise, stations, z0, z1, qc)
+    key = (_T_soak(soak_s), cruise, stations, z0, z1, qc)
     if key in _SECTION_CACHE:
         _SECTION_CACHE.move_to_end(key)
         return _SECTION_CACHE[key]
@@ -656,7 +699,7 @@ def _section_rows(cruise, stations, z0, z1, qc):
     df = con.execute(f"""
         SELECT station_id, station_name, lat, lon, time_iso, depth_m, dbar_bin,
                theta, in_situ_temp, SP, rho, o2_final, ph_final, chl_final
-        FROM {_T()}
+        FROM {_T_soak(soak_s)}
         WHERE cruise_id = ?
         AND dbar_bin BETWEEN ? AND ?
         AND is_soak = 0
@@ -673,16 +716,16 @@ def _section_rows(cruise, stations, z0, z1, qc):
 
 
 def _section_impl(target_cruise, z_range, filter_qc, section_var_label, chosen_stations, axis_label, gap_km,
-                  grid_label='Weighted average (ODV-style)', lx_pct=5.0, ly_pct=2.0):
+                  grid_label='Weighted average (ODV-style)', lx_pct=5.0, ly_pct=2.0, soak_s=0):
     col, cmap, unit = _SECTION_VARS[section_var_label]
     if not chosen_stations:
         return pn.pane.Alert("Choose at least two stations for the section.", alert_type='warning')
 
     # Fetch only the chosen stations.  A stale list from another cruise matches nothing: use every station.
     chosen_key = tuple(sorted(chosen_stations))
-    df = _section_rows(target_cruise, chosen_key, z_range[0], z_range[1], bool(filter_qc))
+    df = _section_rows(target_cruise, chosen_key, z_range[0], z_range[1], bool(filter_qc), soak_s)
     if df.empty:
-        df = _section_rows(target_cruise, None, z_range[0], z_range[1], bool(filter_qc))
+        df = _section_rows(target_cruise, None, z_range[0], z_range[1], bool(filter_qc), soak_s)
     if df.empty:
         return pn.pane.Alert("No data available for section plot.")
     df = df.copy()                                  # the cached rows stay untouched
@@ -883,21 +926,21 @@ view_section = pn.Column(
                   section_station_select, pn.Row(section_all_btn, section_none_btn), margin=(0, 10, 0, 10)),
         pn.bind(_section_impl, cruise_select, depth_slider, qc_checkbox, section_var_select,
                 section_station_select, section_axis_select, section_gap_slider,
-                section_grid_select, section_lx_slider, section_ly_slider),
+                section_grid_select, section_lx_slider, section_ly_slider, soak_slider),
         pn.bind(_section_map_impl, cruise_select, section_station_select, section_axis_select),
     ),
     sizing_mode='stretch_both',
 )
 
 # ── Tabular data ───────────────────────────────────────────────────────────────
-def _tabular_impl(target_cruise, target_id, z_range, filter_qc, show_soak):
-    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak)
+def _tabular_impl(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s):
+    df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s)
     if df.empty:
         return pn.pane.Alert("No data for the current selection.")
     return pn.widgets.Tabulator(df, pagination='remote', page_size=15, theme='midnight', sizing_mode='stretch_both')
 
 view_tabular_data = pn.Column(
-    pn.bind(_tabular_impl, cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle),
+    pn.bind(_tabular_impl, cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider),
     sizing_mode='stretch_both'
 )
 
@@ -918,7 +961,7 @@ tabs = pn.Tabs(
 
 dashboard = pn.template.FastListTemplate(
     title="R/V Western Flyer - CTD (SBE 19plus V2)",
-    sidebar=[cruise_select, source_select, direction_select, station_select, depth_slider, qc_checkbox, soak_toggle, pn.pane.Markdown("---"), csv_button],
+    sidebar=[cruise_select, source_select, direction_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider, soak_note, pn.pane.Markdown("---"), csv_button],
     main=[tabs], accent_base_color="#00f2ff", header_background="#1a1a1a"
 )
 

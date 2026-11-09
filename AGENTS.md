@@ -52,6 +52,7 @@ The codebase is organized into modular components, each responsible for a distin
     - Renders vertical profiles, T-S analysis, and vertical sections with isopycnal contours.
     - Calculates real-time analytics: Apparent Oxygen Utilization (AOU), Mixed Layer Depth (MLD), and the Metabolic Index ($\Phi$).
     - Facilitates tabular data export for external analysis.
+    - Hides the first N seconds of every raw cast with the **Soak time hidden (s)** slider (default 0 s, i.e. nothing extra hidden; Sea-Bird's `PumpDelay=60` profiling example suggests 60 s). It is applied through `_T_soak()` and is disabled for processed sources.
 - **Key Interface:** `dashboard.servable()`
 
 ### 5. Infrastructure Component (Scripts)

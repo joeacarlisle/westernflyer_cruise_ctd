@@ -307,6 +307,14 @@ If a cast cannot be processed, the build logs one error line with the reason (fo
 
 The CTD dashboard starts on port 5006 (Panel's default) at `http://localhost:5006`. The flow-through dashboard in [westernflyer_cruise_flowthru](../westernflyer_cruise_flowthru) starts on port 5007, so the two applications can run side by side.
 
+### Soak time
+
+The sidebar has a **Soak time hidden (s)** slider (0 to 600 s, default **0**, which hides nothing extra). It hides the first N seconds of every raw cast, counted from the cast's first scan, in every tab, the table and the CSV export. Sea-Bird's SBE 19plus V2 manual gives no fixed soak time: its profiling example says to let the instrument soak at least the time needed for the pump to turn on (`PumpDelay=60`, 60 seconds), so 60 s is a sensible value to choose. Data logged before the pump has been running is not trusted: the conductivity cell is not yet flushed and the oxygen sensor has not yet equilibrated.
+
+* It is separate from **Show Soak Data (Surface)**, which shows or hides the rows the build flagged as soak (shallow rows before the descent is detected). Both filters apply.
+* It applies to the raw source only. Processed (`.cnv`) files have one start time for every bin and SeaSoft has already removed the soak, so the slider is disabled for them.
+* A value longer than a cast's record, or longer than its calculated soak, hides the top of the profile or the whole cast (the tabs then show "Data Pending..."). Lower the slider to see it.
+
 ### Vertical Section tab
 
 The section is a vertical slice through the stations you choose, drawn in the style of Ocean Data View. Controls above the plot:
