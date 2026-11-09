@@ -28,9 +28,15 @@ To avoid Windows permission issues, place the root folder inside your Windows us
 This project requires **Python 3.13**.
 
 ### Windows
-When installing, the installer will ask: "Add Python to PATH?" **Select NO.**
 
-* **Typical path:** `C:\Users\<your_username>\AppData\Local\Programs\Python\Python313\`
+Install Python 3.13 from python.org (not from the Microsoft Store, which puts it in a different folder than the instructions below assume).
+
+1. If you installed Python 3.13 from the Microsoft Store, remove it first: Windows Settings, Apps, "Python 3.13", Uninstall.
+2. Download the "Windows installer (64-bit)" for Python 3.13 from https://www.python.org/downloads/windows/.
+3. Run it and choose **Install Now**. Leave **"Install for all users"** unticked, so it installs for your user only. Leave the **py launcher** ticked.
+4. When the installer asks to **"Add python.exe to PATH"**, select **No** (leave it unticked).
+5. Python installs to `C:\Users\<your_username>\AppData\Local\Programs\Python\Python313\`.
+6. Check it in Command Prompt: `py -0p` should list `Python313` under `AppData\Local\Programs\Python`.
 
 ### macOS (Homebrew)
     brew install python@3.13
