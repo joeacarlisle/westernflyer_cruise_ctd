@@ -38,7 +38,7 @@ import numpy as np
 import pandas as pd
 
 import eos80_processing
-from sbe19plus_ingestion import dm_to_decimal, resolve_cast_start_utc
+from sbe19plus_ingestion import to_decimal_degrees, resolve_cast_start_utc
 
 CNV_SOURCES = ('downcast', 'upcast', 'fullcast')
 
@@ -58,7 +58,7 @@ _PREFIX_TO_KEY = [
 ]
 
 
-def file_key_from_cnv(path):
+def station_id_from_cnv(path):
     """'20250916_Cabrillo_cast1_filter_..._downcast.cnv' -> '20250916_Cabrillo_cast1'.
 
     The cast key is everything before the first SeaSoft module suffix
@@ -71,8 +71,8 @@ def find_cnv_files(directory):
     """Returns the .cnv files in a folder, plus .asc files for casts with no .cnv."""
     directory = Path(directory)
     cnv = sorted(directory.glob('*.cnv'))
-    have = {file_key_from_cnv(p) for p in cnv}
-    asc = [p for p in sorted(directory.glob('*.asc')) if file_key_from_cnv(p) not in have]
+    have = {station_id_from_cnv(p) for p in cnv}
+    asc = [p for p in sorted(directory.glob('*.asc')) if station_id_from_cnv(p) not in have]
     return sorted(cnv + asc, key=lambda p: p.name)
 
 
@@ -177,14 +177,14 @@ def ingest_cnv(file_path, cruise_log, config, cruise_id, source):
         raise ValueError(f"{file_path.name}: no data rows.")
 
     # --- station metadata (same lookup the raw path uses) ---
-    key = file_key_from_cnv(file_path)
+    key = station_id_from_cnv(file_path)
     meta = cruise_log.get(key)
     if meta is None:
         raise ValueError(
-            f"{file_path.name}: file key '{key}' not found in stations.csv "
-            f"(file_key must equal the text before '_filter').")
-    lat = dm_to_decimal(meta.get('lat'))
-    lon = dm_to_decimal(meta.get('lon'))
+            f"{file_path.name}: station_id '{key}' not found in stations.csv "
+            f"(station_id must equal the text before '_filter').")
+    lat = to_decimal_degrees(meta.get('lat'))
+    lon = to_decimal_degrees(meta.get('lon'))
     if lat is None or lon is None:
         raise ValueError(f"{file_path.name}: no lat/lon in stations.csv for '{key}'.")
 

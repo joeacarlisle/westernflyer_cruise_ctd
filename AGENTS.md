@@ -42,7 +42,7 @@ The codebase is organized into modular components, each responsible for a distin
 - **Key Interface:** `main()` entry point, `build_source()` and `process_one_cast()`.
 
 ### 3b. Section Gridding (`section_grid.py`)
-**Role:** ODV-style weighted-average gridding for the Vertical Section tab (numpy only, unit-tested in `tests/test_section_grid.py`).
+**Role:** ODV-style weighted-average gridding for the Vertical Section tab (numpy only).
 - **Key Interface:** `weighted_average_grid()`, `effective_horizontal_scale()`
 
 ### 4. Analysis Component (`ctd_holoviews.py`)
@@ -69,13 +69,12 @@ When an AI agent (like Junie or others) interacts with this repository, it shoul
 1. **Directory Structure:** Create `cruises/<cruise_id>/`.
 2. **Raw Data:** Place `.hex` files in `cruises/<cruise_id>/hex/`. Optional processed data goes in `cnv_downcast/`, `cnv_upcast/`, `cnv_fullcast/`.
 3. **Calibration:** Ensure `calibration.xmlcon` and `config.toml` are present in the cruise root.
-4. **Metadata:** Populate `stations.csv` with mappings from file keys to geographic coordinates and cast numbers.
+4. **Metadata:** Populate `stations.csv` with mappings from `station_id` (the cast file name without extension) to decimal-degree `lat`/`lon` (negative south/west) and cast numbers. The column names `station_id`, `lat`, `lon` match the echogram project's `stations.csv`.
 
 ### Modifying the Pipeline
 - **Physics Changes:** All oceanographic logic should reside in `eos80_processing.py`. Use the `seabirdscientific` toolkit wherever possible to maintain parity with official Sea-Bird standards.
 - **Ingestion Changes:** Add new sensors or change A/D conversion logic in `sbe19plus_ingestion.py`.
 - **Database Schema:** If adding columns, update the aggregation configuration in `main.py`, `cnv_ingestion.OUTPUT_COLUMNS` and the query logic in `ctd_holoviews.py`. All dashboard queries read through `_T()`, which filters by the selected data source and cast direction.
-- **Tests:** `python -m unittest discover -s tests -v`.
 
 ### Execution and Verification
 - **Run the Build:** Use `python main.py <cruise_id>` to process data.

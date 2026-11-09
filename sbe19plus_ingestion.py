@@ -288,31 +288,20 @@ def parse_hex_header(hex_path):
 # Shared helpers (unchanged from .cnv version)
 # ---------------------------------------------------------------------------
 
-def dm_to_decimal(dm_str):
-    """Converts DD-MM.MM[NSEW] compass format to decimal degrees.
+def to_decimal_degrees(value):
+    """Signed decimal degrees from a stations.csv lat/lon value (negative = south/west).
 
-    Returns None and logs a warning on unparseable input rather than
-    raising, so a single bad cruise-log row doesn't kill the whole build.
+    Returns None for a blank value, or (with a warning) for anything that is not a number
+    inside the valid range, so a single bad row doesn't kill the whole build.
     """
-    if dm_str is None:
+    if value is None:
         return None
-    if isinstance(dm_str, (int, float)):
-        return float(dm_str)
     try:
-        match = re.match(r"(\d+)-(\d+\.?\d*)([NSEW])", str(dm_str).strip())
-        if not match:
-            logging.warning(
-                "Coordinate '%s' did not match DD-MM.MM[NSEW]; returning None.", dm_str
-            )
-            return None
-        deg, mins, direction = match.groups()
-        decimal = float(deg) + (float(mins) / 60.0)
-        if direction in ('S', 'W'):
-            decimal *= -1
-        return decimal
-    except (ValueError, AttributeError, TypeError) as exc:
-        logging.warning("Failed to parse coordinate '%s': %s", dm_str, exc)
+        x = float(value)
+    except (TypeError, ValueError):
+        logging.warning("Coordinate '%s' is not decimal degrees; returning None.", value)
         return None
+    return x if np.isfinite(x) else None
 
 
 def load_config(file_path):
@@ -340,13 +329,30 @@ def load_config(file_path):
 
 
 def load_cruise_log(file_path):
-    """Loads cruise metadata CSV keyed by file_key (hex stem)."""
+    """Loads cruise metadata CSV keyed by station_id (the cast file name without extension).
+
+    ``lat`` and ``lon`` must be signed decimal degrees (negative = south/west); a blank value
+    means the position is unknown.  The same two columns and key name are used by the
+    echogram project's stations.csv.
+    """
     logging.info("Loading cruise log: %s", file_path)
     df = pd.read_csv(file_path)
-    if df['file_key'].duplicated().any():
-        dups = df.loc[df['file_key'].duplicated(), 'file_key'].tolist()
-        raise ValueError(f"Duplicate file_key entries in {file_path}: {dups}")
-    return df.set_index('file_key').to_dict('index')
+    missing = [c for c in ('station_id', 'lat', 'lon') if c not in df.columns]
+    if missing:
+        raise ValueError(f"{file_path}: missing required column(s) {missing}; "
+                         f"stations.csv needs station_id, lat, lon (decimal degrees)")
+    if df['station_id'].duplicated().any():
+        dups = df.loc[df['station_id'].duplicated(), 'station_id'].tolist()
+        raise ValueError(f"Duplicate station_id entries in {file_path}: {dups}")
+    for col, limit in (('lat', 90.0), ('lon', 180.0)):
+        num = pd.to_numeric(df[col], errors='coerce')
+        bad = df[col].notna() & (num.isna() | (num.abs() > limit))
+        if bad.any():
+            rows = [f"{s}: {v!r}" for s, v in zip(df.loc[bad, 'station_id'], df.loc[bad, col])]
+            raise ValueError(f"{file_path}: '{col}' must be decimal degrees within +/-{limit:g} "
+                             f"(negative = south/west); bad value(s): {rows}")
+        df[col] = num
+    return df.set_index('station_id').to_dict('index')
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +367,7 @@ def ingest_sbe_hex(file_path, cruise_log, config, sensor_coefs):
     file_path : str or Path
         Path to the raw .hex file.
     cruise_log : dict
-        Keyed by file_key (hex stem).  Each value has lat, lon,
+        Keyed by station_id (hex stem).  Each value has lat, lon,
         station_name, sb_cast, wf_cast, start_utc.
     config : dict
         calibration.csv parameters (CRUISE_ID and processing knobs).
@@ -392,8 +398,8 @@ def ingest_sbe_hex(file_path, cruise_log, config, sensor_coefs):
     file_stem = file_path.stem
 
     # --- Cruise-log lookup with cruise-median fallback ---
-    valid_lats = [dm_to_decimal(v.get('lat')) for v in cruise_log.values()]
-    valid_lons = [dm_to_decimal(v.get('lon')) for v in cruise_log.values()]
+    valid_lats = [to_decimal_degrees(v.get('lat')) for v in cruise_log.values()]
+    valid_lons = [to_decimal_degrees(v.get('lon')) for v in cruise_log.values()]
     valid_lats = [x for x in valid_lats if x is not None]
     valid_lons = [x for x in valid_lons if x is not None]
     fallback_lat = float(pd.Series(valid_lats).median()) if valid_lats else float('nan')
@@ -410,8 +416,8 @@ def ingest_sbe_hex(file_path, cruise_log, config, sensor_coefs):
             "(%.4f, %.4f).", file_stem, fallback_lat, fallback_lon
         )
 
-    lat = dm_to_decimal(meta.get('lat', default_meta['lat']))
-    lon = dm_to_decimal(meta.get('lon', default_meta['lon']))
+    lat = to_decimal_degrees(meta.get('lat', default_meta['lat']))
+    lon = to_decimal_degrees(meta.get('lon', default_meta['lon']))
     lat = lat if lat is not None else fallback_lat
     lon = lon if lon is not None else fallback_lon
 

@@ -14,9 +14,8 @@ View.
 Speed: the weight is a product of an x term and a y term, so the average over
 all measurements is computed with two small matrix products instead of
 comparing every cell with every measurement.  Measurements are first averaged
-into the rows of the output grid (one value per station and grid row).  A
-1,500-station section takes milliseconds; the cost no longer depends on how
-many raw rows there are.
+into the rows of the output grid (one value per station and grid row), so the
+cost no longer depends on how many raw rows there are.
 """
 import numpy as np
 

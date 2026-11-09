@@ -797,7 +797,7 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label, chosen_s
     )
 
     # ── Station marker lines ──────────────────────────────────────────────────
-    # One element for all stations (one VLine per station took tens of seconds with 1,500 stations).
+    # One element for all stations (one VLine per station is very slow with many stations).
     sta_lines = hv.VLines(list(map(float, cum_dist))).opts(
         color='white', line_width=0.8, line_dash='dashed', alpha=0.5)
 
