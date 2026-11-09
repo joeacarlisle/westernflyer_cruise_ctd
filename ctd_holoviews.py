@@ -333,6 +333,25 @@ view_cruise_summary = pn.Column(
     sizing_mode='stretch_both'
 )
 
+def _calc_soak_note(target_cruise, target_id):
+    """Calculated soak of one cast (raw source): from the cast's first scan to the first scan that is
+    no longer flagged ``is_soak`` (see ``apply_soak_elimination`` in eos80_processing.py)."""
+    if not target_id or not _soak_applies():
+        return ""
+    r = con.execute(
+        f"SELECT epoch(min(time_iso)) AS t0, epoch(min(time_iso) FILTER (WHERE NOT is_soak)) AS t1, "
+        f"count(*) FILTER (WHERE NOT is_soak) AS n_good "
+        f"FROM {_T()} WHERE cruise_id = ? AND station_id = ?", (target_cruise, target_id)).fetchone()
+    if r is None or r[0] is None:
+        return ""
+    t0, t1, n_good = r
+    if not n_good or t1 is None:
+        return "*Calculated soak: the whole cast is flagged as soak (no descent found).*"
+    dur = max(0.0, float(t1) - float(t0))
+    return (f"*Calculated soak for this cast: {dur:.0f} s, until the descent becomes steady. "
+            f"Hidden unless Show Soak Data is checked; the slider counts from the start of the cast.*")
+
+
 @pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider)
 def view_profiles(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s):
     df = get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s)
@@ -355,7 +374,8 @@ def view_profiles(target_cruise, target_id, z_range, filter_qc, show_soak, soak_
     grid = hv.render(layout, backend='bokeh')
     grid.background = 'white'
     grid.toolbar.styles = {'background-color': 'white'}   # the toolbar box (upper right) too
-    return pn.pane.Bokeh(grid)
+    note = _calc_soak_note(target_cruise, target_id)
+    return pn.Column(pn.pane.Markdown(note), pn.pane.Bokeh(grid)) if note else pn.pane.Bokeh(grid)
 
 @pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, soak_slider)
 def view_multi_profile(target_cruise, target_id, z_range, filter_qc, show_soak, soak_s):
