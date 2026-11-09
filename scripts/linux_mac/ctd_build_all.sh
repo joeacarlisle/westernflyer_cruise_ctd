@@ -3,6 +3,9 @@
 # Rebuild every cruise under cruises/ into the DuckDB database, one after another.
 #
 # Usage:   ./ctd_build_all.sh [extra args forwarded to main.py, e.g. --bin-size 0.5]
+# Builds with --source all: raw .hex data plus any SeaSoft-processed folders
+# (cnv_downcast, cnv_upcast, cnv_fullcast) that a cruise has. Pass --source raw
+# to build raw data only.
 # Each cruise is a folder under cruises/ whose name is the cruise ID.
 # Add a new cruise by creating its folder; no edit to this script is needed.
 #
@@ -21,7 +24,7 @@ for dir in cruises/*/; do
     cruise="$(basename "$dir")"
     echo
     echo "===== Building ${cruise} ====="
-    python main.py "${cruise}" "$@" || failed+=("${cruise}")
+    python main.py "${cruise}" --source all "$@" || failed+=("${cruise}")
 done
 
 echo

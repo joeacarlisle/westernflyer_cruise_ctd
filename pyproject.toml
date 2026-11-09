@@ -41,5 +41,8 @@ py-modules = [
     "main",
     "eos80_processing",
     "sbe19plus_ingestion",
+    "cnv_ingestion",
+    "section_grid",
+    "compare_sources",
     "ctd_holoviews",
 ]

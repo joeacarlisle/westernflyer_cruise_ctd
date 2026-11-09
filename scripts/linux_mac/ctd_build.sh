@@ -5,6 +5,10 @@
 # Usage:   ./ctd_build.sh <cruise_id>
 # Example: ./ctd_build.sh 2025_Baja
 #
+# Builds with --source all: raw .hex data plus any SeaSoft-processed folders
+# (cnv_downcast, cnv_upcast, cnv_fullcast) the cruise has. Add --source raw
+# for raw data only (a later --source overrides this default).
+#
 # Make executable once with:  chmod +x ctd_build.sh
 
 set -u
@@ -33,7 +37,7 @@ fi
 # so we no longer delete the prior log.
 
 echo "Starting CTD build for cruise: ${CRUISE_ID}"
-python main.py "${CRUISE_ID}" "$@"
+python main.py "${CRUISE_ID}" --source all "$@"
 status=$?
 
 if [ "${status}" -eq 0 ]; then

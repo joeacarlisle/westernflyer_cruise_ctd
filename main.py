@@ -51,6 +51,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+import cnv_ingestion
 import eos80_processing
 import sbe19plus_ingestion
 from sbe19plus_ingestion import parse_xmlcon, ingest_sbe_hex
@@ -59,6 +60,11 @@ from seabirdscientific.processing import FLAG_VALUE, get_downcast
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BASE_DIR / "processed" / "wf_ctd_eos80.duckdb"
 LOG_DIR = BASE_DIR / "logs"
+
+# Data sources: raw instrument .hex files, or SeaSoft-processed files in
+# cruises/<cruise_id>/cnv_<source>/.  'all' builds every source that has input.
+SOURCES = ["raw", "downcast", "upcast", "fullcast", "all"]
+SOURCE_ORDER = ("raw", "downcast", "upcast", "fullcast")
 
 
 def setup_logging(cruise_id, verbose=False):
@@ -148,13 +154,55 @@ def process_one_cast(file_path, cruise_log, config, cruise_id, output_res, senso
 
     df_binned['cruise_id'] = cruise_id
     df_binned['filename'] = file_path.name
+    df_binned['data_source'] = 'raw'
+    df_binned['cast_direction'] = 'down'   # raw casts keep the downcast only
     return df_binned
 
 
-def commit_to_duckdb(full_df, cruise_id, db_path, calibration_path, build_started):
-    """Replaces the cruise's rows atomically and records build provenance."""
+def files_sha256(paths):
+    """SHA-256 over several files (sorted by name); provenance for processed builds."""
+    h = hashlib.sha256()
+    for p in sorted(paths, key=lambda x: x.name):
+        h.update(p.name.encode())
+        h.update(file_sha256(p).encode())
+    return h.hexdigest()
+
+
+def _columns(con, table):
+    return [r[1] for r in con.execute(f"PRAGMA table_info('{table}')").fetchall()]
+
+
+def migrate_schema(con):
+    """Adds data_source / cast_direction to databases built before processed sources.
+
+    Existing rows are raw downcasts, so they are labelled 'raw' / 'down'.
+    """
+    cols = _columns(con, 'ctd_data')
+    if 'data_source' not in cols:
+        con.execute("ALTER TABLE ctd_data ADD COLUMN data_source VARCHAR")
+        con.execute("UPDATE ctd_data SET data_source = 'raw'")
+        logging.info("Migrated ctd_data: added data_source (existing rows set to 'raw').")
+    if 'cast_direction' not in cols:
+        con.execute("ALTER TABLE ctd_data ADD COLUMN cast_direction VARCHAR")
+        con.execute("UPDATE ctd_data SET cast_direction = 'down'")
+        logging.info("Migrated ctd_data: added cast_direction (existing rows set to 'down').")
+    if 'data_source' not in _columns(con, 'build_metadata'):
+        con.execute("ALTER TABLE build_metadata ADD COLUMN data_source VARCHAR")
+        con.execute("UPDATE build_metadata SET data_source = 'raw'")
+        logging.info("Migrated build_metadata: added data_source.")
+
+
+def commit_to_duckdb(full_df, cruise_id, db_path, calibration_path, build_started,
+                     cal_hash=None, data_source='raw'):
+    """Replaces the cruise's rows for one data source atomically and records provenance.
+
+    Rows are replaced per (cruise_id, data_source), so building downcast
+    never touches the raw rows and vice versa.  ``cal_hash`` overrides the
+    hash of ``calibration_path`` (processed builds hash the input files).
+    """
     db_path.parent.mkdir(exist_ok=True)
-    cal_hash = file_sha256(calibration_path)
+    if cal_hash is None:
+        cal_hash = file_sha256(calibration_path)
     commit = git_commit()
 
     with duckdb.connect(str(db_path)) as con:
@@ -167,17 +215,24 @@ def commit_to_duckdb(full_df, cruise_id, db_path, calibration_path, build_starte
                 build_finished_ts TIMESTAMP,
                 calibration_sha256 VARCHAR,
                 git_commit       VARCHAR,
-                rows_written     BIGINT
+                rows_written     BIGINT,
+                data_source      VARCHAR
             )
         """)
+        migrate_schema(con)
         con.execute("BEGIN TRANSACTION")
         try:
-            con.execute("DELETE FROM ctd_data WHERE cruise_id = ?", [cruise_id])
-            con.execute("INSERT INTO ctd_data SELECT * FROM df_view")
-            con.execute("DELETE FROM build_metadata WHERE cruise_id = ?", [cruise_id])
+            con.execute("DELETE FROM ctd_data WHERE cruise_id = ? AND data_source = ?",
+                        [cruise_id, data_source])
+            con.execute("INSERT INTO ctd_data BY NAME SELECT * FROM df_view")
+            con.execute("DELETE FROM build_metadata WHERE cruise_id = ? AND data_source = ?",
+                        [cruise_id, data_source])
             con.execute(
-                "INSERT INTO build_metadata VALUES (?, ?, ?, ?, ?, ?)",
-                [cruise_id, build_started, dt.datetime.now(), cal_hash, commit, len(full_df)],
+                "INSERT INTO build_metadata (cruise_id, build_started_ts, build_finished_ts, "
+                "calibration_sha256, git_commit, rows_written, data_source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [cruise_id, build_started, dt.datetime.now(), cal_hash, commit,
+                 len(full_df), data_source],
             )
             con.execute("COMMIT")
         except Exception:
@@ -188,19 +243,99 @@ def commit_to_duckdb(full_df, cruise_id, db_path, calibration_path, build_starte
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Build the Western Flyer CTD DuckDB for one cruise.")
     parser.add_argument("cruise_id", help="Cruise directory name under cruises/, e.g. baja2025")
+    parser.add_argument("--source", choices=SOURCES, default="raw",
+                        help="Data source: raw (.hex files, default), downcast, upcast or "
+                             "fullcast (SeaSoft-processed files in cruises/<id>/cnv_<source>/), "
+                             "or all (every source that has input files).")
     parser.add_argument("--bin-size", type=float, default=None,
-                        help="Override BIN_SIZE_METERS from config.toml (m)")
+                        help="Override BIN_SIZE_METERS from config.toml (m); raw source only")
     parser.add_argument("--db", type=pathlib.Path, default=DEFAULT_DB_PATH,
                         help=f"DuckDB output path (default: {DEFAULT_DB_PATH})")
     parser.add_argument("--xmlcon", type=pathlib.Path, default=None,
                         help="Path to .xmlcon calibration file "
-                             "(default: cruises/<cruise_id>/calibration.xmlcon)")
+                             "(default: cruises/<cruise_id>/calibration.xmlcon); raw source only")
     parser.add_argument("--hex-dir", type=pathlib.Path, default=None,
                         help="Directory containing raw .hex files "
                              "(default: cruises/<cruise_id>/hex/)")
+    parser.add_argument("--cnv-dir", type=pathlib.Path, default=None,
+                        help="Directory of processed files "
+                             "(default: cruises/<cruise_id>/cnv_<source>/); one source only")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Enable DEBUG-level logging")
     return parser.parse_args(argv)
+
+
+def _source_input_dir(source, cruise_dir, args):
+    if source == "raw":
+        return args.hex_dir if args.hex_dir else cruise_dir / "hex"
+    return args.cnv_dir if args.cnv_dir else cruise_dir / f"cnv_{source}"
+
+
+def _input_files(source, directory):
+    if source == "raw":
+        return sorted(directory.glob("*.hex"))
+    return cnv_ingestion.find_cnv_files(directory)
+
+
+def build_source(source, files, args, cruise_id, cruise_dir, config, cruise_log,
+                 calibration_path, build_started):
+    """Processes one source's files and commits them.  Returns the failure count,
+    or None if nothing could be processed (the database was not updated)."""
+    output_res = float(args.bin_size if args.bin_size is not None
+                       else config.get('BIN_SIZE_METERS', 1.0))
+    cal_hash = None
+    sensor_coefs = None
+    xmlcon_path = calibration_path
+    if source == "raw":
+        # Resolve .xmlcon path (default: cruises/<cruise_id>/calibration.xmlcon)
+        xmlcon_path = args.xmlcon if args.xmlcon else cruise_dir / 'calibration.xmlcon'
+        if not xmlcon_path.exists():
+            logging.error(f"Calibration .xmlcon not found: {xmlcon_path}")
+            sys.exit(1)
+        sensor_coefs = parse_xmlcon(xmlcon_path)
+    elif files:
+        cal_hash = files_sha256(files)
+
+    processed_data = []
+    failures = []
+    for file_path in files:
+        logging.info(f"[{source}] Processing: {file_path.name}")
+        try:
+            if source == "raw":
+                df_binned = process_one_cast(
+                    file_path, cruise_log, config, cruise_id, output_res, sensor_coefs
+                )
+            else:
+                df_binned = cnv_ingestion.ingest_cnv(
+                    file_path, cruise_log, config, cruise_id, source
+                )
+            processed_data.append(df_binned)
+        except Exception as exc:
+            logging.error(f"Failed to process {file_path.name}: {exc}")
+            logging.debug("Traceback for %s", file_path.name, exc_info=True)
+            failures.append((file_path.name, str(exc)))
+            continue
+
+    if not processed_data:
+        logging.warning(f"[{source}] No data processed; database not updated.")
+        if failures:
+            logging.warning(f"All {len(failures)} casts failed:")
+            for name, reason in failures:
+                logging.warning(f"  {name}: {reason}")
+        return None
+
+    full_df = pd.concat(processed_data, ignore_index=True)
+    logging.info(f"[{source}] Committing {len(full_df)} binned records to {args.db}")
+    commit_to_duckdb(full_df, cruise_id, args.db, xmlcon_path, build_started,
+                     cal_hash=cal_hash, data_source=source)
+
+    if failures:
+        logging.warning(f"[{source}] Finished with {len(failures)} failed casts:")
+        for name, reason in failures:
+            logging.warning(f"  {name}: {reason}")
+    else:
+        logging.info(f"[{source}] Finished successfully.")
+    return len(failures)
 
 
 def main(argv=None):
@@ -215,8 +350,12 @@ def main(argv=None):
         logging.error(f"Cruise directory '{cruise_dir}' not found.")
         sys.exit(1)
 
+    if args.source == "all" and args.cnv_dir is not None:
+        logging.error("--cnv-dir cannot be combined with --source all.")
+        sys.exit(2)
+
     build_started = dt.datetime.now()
-    logging.info(f"--- STARTING PIPELINE FOR {cruise_id.upper()} ---")
+    logging.info(f"--- STARTING PIPELINE FOR {cruise_id.upper()} (source: {args.source}) ---")
     logging.info(f"Build log: {log_path}")
 
     calibration_path = cruise_dir / 'config.toml'
@@ -226,59 +365,42 @@ def main(argv=None):
     config['CRUISE_ID'] = cruise_id
     eos80_processing.validate_config(config)
 
-    output_res = float(args.bin_size if args.bin_size is not None
-                       else config.get('BIN_SIZE_METERS', 1.0))
-
-    # Resolve .xmlcon path (default: cruises/<cruise_id>/calibration.xmlcon)
-    xmlcon_path = args.xmlcon if args.xmlcon else cruise_dir / 'calibration.xmlcon'
-    if not xmlcon_path.exists():
-        logging.error(f"Calibration .xmlcon not found: {xmlcon_path}")
-        sys.exit(1)
-    sensor_coefs = parse_xmlcon(xmlcon_path)
-
-    # Resolve hex directory (default: cruises/<cruise_id>/hex/)
-    hex_dir = args.hex_dir if args.hex_dir else cruise_dir / 'hex'
-    if not hex_dir.exists():
-        logging.error(f"Hex directory not found: {hex_dir}")
-        sys.exit(1)
-
-    files = sorted(hex_dir.glob("*.hex"))
-    if not files:
-        logging.warning(f"No .hex files found in {hex_dir}")
-
-    processed_data = []
-    failures = []
-    for file_path in files:
-        logging.info(f"Processing: {file_path.name}")
-        try:
-            df_binned = process_one_cast(
-                file_path, cruise_log, config, cruise_id, output_res, sensor_coefs
-            )
-            processed_data.append(df_binned)
-        except Exception as exc:
-            logging.error(f"Failed to process {file_path.name}: {exc}")
-            logging.debug("Traceback for %s", file_path.name, exc_info=True)
-            failures.append((file_path.name, str(exc)))
-            continue
-
-    if not processed_data:
-        logging.warning("No data processed; database not updated.")
-        if failures:
-            logging.warning(f"All {len(failures)} casts failed:")
-            for name, reason in failures:
-                logging.warning(f"  {name}: {reason}")
-        sys.exit(1 if failures else 0)
-
-    full_df = pd.concat(processed_data, ignore_index=True)
-    logging.info(f"Committing {len(full_df)} binned records to {args.db}")
-    commit_to_duckdb(full_df, cruise_id, args.db, xmlcon_path, build_started)
-
-    if failures:
-        logging.warning(f"Pipeline finished with {len(failures)} failed casts:")
-        for name, reason in failures:
-            logging.warning(f"  {name}: {reason}")
+    # Work out which sources to build and their input files.
+    plan = []
+    if args.source == "all":
+        for source in SOURCE_ORDER:
+            directory = _source_input_dir(source, cruise_dir, args)
+            files = _input_files(source, directory) if directory.exists() else []
+            if files:
+                plan.append((source, files))
+            else:
+                logging.info(f"[{source}] No input files in {directory}; skipped.")
+        if not plan:
+            logging.error("--source all found no input files for any source.")
+            sys.exit(1)
     else:
-        logging.info("Pipeline finished successfully.")
+        source = args.source
+        directory = _source_input_dir(source, cruise_dir, args)
+        if not directory.exists():
+            kind = "Hex" if source == "raw" else "CNV"
+            logging.error(f"{kind} directory not found: {directory}")
+            sys.exit(1)
+        files = _input_files(source, directory)
+        if not files:
+            logging.warning(f"No input files found in {directory}")
+        plan.append((source, files))
+
+    results = {}
+    for source, files in plan:
+        results[source] = build_source(source, files, args, cruise_id, cruise_dir, config,
+                                       cruise_log, calibration_path, build_started)
+
+    # Exit code: nonzero only if a source with input produced nothing because every cast failed.
+    all_failed = [s for s, r in results.items() if r is None and dict(plan)[s]]
+    if all_failed:
+        logging.error(f"No data written for: {', '.join(all_failed)}")
+        sys.exit(1)
+    logging.info("Pipeline finished.")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,8 @@ This repository contains the processing pipeline and visualization suite for Sea
 
 The Western Flyer CTD codebase is a modular, automated processing pipeline designed for Sea-Bird SBE 19plus V2 CTD instrumentation. It provides a standardized framework for raw hex data conversion, physical correction, and interactive visualization.
 
-* **Raw .hex Processing:** The pipeline starts from raw instrument `.hex` files rather than SeaSoft-processed `.cnv` files. Calibration coefficients are read directly from the instrument's `.xmlcon` configuration file, giving you full provenance over every conversion step.
+* **Raw .hex Processing (default):** The pipeline starts from raw instrument `.hex` files. Calibration coefficients are read directly from the instrument's `.xmlcon` configuration file, giving you full provenance over every conversion step.
+* **SeaSoft-processed data (optional):** Files already processed in SeaSoft (`.cnv`, or fullcast `.asc`) can be loaded as a separate data source: downcast, upcast or fullcast. They are stored next to the raw rows in the same database and the dashboard has a **Data source** selector. See [Processed data sources](#processed-data-sources-cnv).
 * **Sea-Bird Scientific Toolkit:** All sensor conversion and correction routines delegate to the official [Sea-Bird Scientific Python toolkit](https://github.com/Sea-Bird-Scientific/seabirdscientific). This includes temperature/pressure/conductivity conversion, O2 tau and hysteresis corrections, cell-thermal-mass correction, Sea-Bird Low-Pass Filter, O2 tau-shift alignment, loop edit, Wild Edit spike removal, and downcast extraction.
 * **Modular Cruise Architecture:** Each expedition is isolated under `cruises/<cruise_id>/`. Adding a new cruise requires only creating a directory with the raw `.hex` files and metadata; the directory name is the cruise ID.
 * **Sidecar Data Integration:** The pipeline joins raw CTD measurements with `config.toml` (processing parameters), `calibration.xmlcon` (sensor coefficients), and `stations.csv` (station metadata) automatically.
@@ -55,6 +56,8 @@ This has the advantage of not requiring root privileges, and it does not install
 *`logs/` and `processed/` are created automatically on first run.*
 
     .
+    |   cnv_ingestion.py
+    |   compare_sources.py
     |   ctd_holoviews.py
     |   eos80_processing.py
     |   main.py
@@ -135,6 +138,10 @@ This has the advantage of not requiring root privileges, and it does not install
 * **main.py** — Orchestrator. Parses CLI args, loads the `.xmlcon` calibration, runs the per-cast pipeline, writes the DuckDB atomically, and stamps build provenance.
 * **sbe19plus_ingestion.py** — Hex ingestion and calibration. Reads raw `.hex` files via `read_hex_file`, applies temperature/pressure/conductivity/O2 (with tau and hysteresis corrections)/pH/CHL conversions from the Sea-Bird Scientific toolkit, and attaches cruise-log metadata.
 * **eos80_processing.py** — EOS-80 physics pipeline. CTM correction, O2 tau-shift, loop edit, Sea-Bird Low-Pass Filter, Wild Edit spike removal, and depth/theta/density calculations all delegate to the Sea-Bird Scientific toolkit. Salinity is derived from CTM-corrected conductivity via `gsw.SP_from_C`.
+* **cnv_ingestion.py** — Reader for SeaSoft-processed `.cnv` / `.asc` files (downcast, upcast, fullcast). Produces the same binned rows as the raw pipeline.
+* **section_grid.py** — Weighted-average gridding used by the Vertical Section tab (ODV-style); numpy only.
+* **compare_sources.py** — Prints per-station differences between two data sources of a cruise (for example raw minus downcast).
+* **tests/** — Unit tests (`python -m unittest discover -s tests -v`).
 * **ctd_holoviews.py** — Read-only Panel dashboard. Reactive widgets update all tabs when cruise or station selection changes.
 * **pyproject.toml** — Package definition. Enables `pip install -e .` to install the project and all dependencies in one step.
 * **config.toml** — Processing constants per cruise (CTM coefficients, bin size, QC thresholds, Wild Edit parameters). See schema below.
@@ -181,6 +188,7 @@ The `-e` (editable) flag means source changes are picked up immediately without 
 3. Copy the sensor calibration file from SeaSoft to `cruises/<cruise_id>/calibration.xmlcon`
 4. Create `cruises/<cruise_id>/config.toml` (see schema below)
 5. Create `cruises/<cruise_id>/stations.csv` (see schema below)
+6. Optional: place SeaSoft-processed files in `cnv_downcast/`, `cnv_upcast/` and/or `cnv_fullcast/` (see [Processed data sources](#processed-data-sources-cnv)). Cruises without these folders build exactly as before.
 
 ### stations.csv schema
 
@@ -192,7 +200,7 @@ The `-e` (editable) flag means source changes are picked up immediately without 
 | `lon`          | Longitude in `DD-MM.MMW` format (e.g. `110-15.00W`) or decimal degrees |
 | `sb_cast`      | Sea-Bird instrument cast number                                        |
 | `wf_cast`      | Western Flyer expedition cast number                                   |
-| `start_utc`    | Cast start time fallback if not in hex header (`YYYY-MM-DD HH:MM:SS`)  |
+| `start_utc`    | Cast start time in UTC (`YYYY-MM-DD HH:MM:SS`). Used when the file header has no time, and to flag a header time that disagrees with it by more than 15 minutes. See [Cast start time](#cast-start-time). |
 
 ## Running the Pipeline
 
@@ -219,11 +227,12 @@ Run the build with the cruise ID as the argument:
 * **Windows:** `scripts\windows\ctd_build.bat <cruise_id>`
 * **Linux / macOS:** `./scripts/linux_mac/ctd_build.sh <cruise_id>`
 
-Each cruise also has a shortcut script with the cruise ID filled in, for example `scripts\windows\ctd_build_2026_PNW.bat`. To rebuild every cruise under `cruises/` one after another, run:
+Each cruise also has a shortcut script with the cruise ID filled in, for example `scripts\windows\ctd_build_2026_PNW.bat`. All build scripts (`ctd_build`, the cruise shortcuts and `ctd_build_all`, on Windows and Linux / macOS) build with `--source all`; add `--source raw` for raw data only. Calling `main.py` directly still defaults to raw. To rebuild every cruise under `cruises/` one after another, run:
 
 * **Windows:** `scripts\windows\ctd_build_all.bat`
 * **Linux / macOS:** `./scripts/linux_mac/ctd_build_all.sh`
 
+The build scripts use `--source all`, so they also load the SeaSoft-processed sources (downcast, upcast, fullcast) for every cruise that has them; cruises without processed folders build raw only.
 Extra arguments (such as `--bin-size 0.5`) are passed on to `main.py`. A cruise's rows in the database are replaced each time it is built, so cruises renamed after an earlier build leave their old rows behind. To remove those, delete `processed/wf_ctd_eos80.duckdb` and rebuild.
 
 Alternatively, call `main.py` directly for full control. The following are example invocations — run only the one that fits your needs:
@@ -241,16 +250,46 @@ Alternatively, call `main.py` directly for full control. The following are examp
     python main.py 2025_Baja --xmlcon /path/to/custom.xmlcon
     python main.py 2025_Baja --hex-dir /path/to/hex_files/
 
+    # Build from SeaSoft-processed files instead of raw (see below)
+    python main.py 2025_MontereyBay --source downcast
+    python main.py 2025_MontereyBay --source all
+
 ### CLI arguments
 
 | Argument           | Default                           | Description                            |
 |--------------------|-----------------------------------|----------------------------------------|
 | `cruise_id`        | *(required)*                      | Cruise directory name under `cruises/` |
-| `--bin-size`       | From `config.toml`                | Vertical bin size in meters            |
+| `--source`         | `raw`                             | `raw`, `downcast`, `upcast`, `fullcast`, or `all` (every source that has input files) |
+| `--bin-size`       | From `config.toml`                | Vertical bin size in meters (raw only) |
 | `--xmlcon`         | `cruises/<id>/calibration.xmlcon` | Path to sensor calibration file        |
 | `--hex-dir`        | `cruises/<id>/hex/`               | Directory containing raw `.hex` files  |
+| `--cnv-dir`        | `cruises/<id>/cnv_<source>/`      | Directory of processed files (one source only) |
 | `--db`             | `processed/wf_ctd_eos80.duckdb`   | DuckDB output path                     |
 | `--verbose` / `-v` | Off                               | Enable DEBUG-level logging             |
+
+### Processed data sources (.cnv)
+
+Besides raw `.hex` files, a cruise can hold casts already processed in SeaSoft. Put them in these folders next to `hex/`; the file names are free-form apart from the cast key:
+
+| Folder                | `--source` | Stored as                                   |
+|-----------------------|------------|---------------------------------------------|
+| `hex/`                | `raw`      | `data_source = raw`, `cast_direction = down` |
+| `cnv_downcast/`       | `downcast` | `downcast` / `down`                         |
+| `cnv_upcast/`         | `upcast`   | `upcast` / `up`                             |
+| `cnv_fullcast/`       | `fullcast` | `fullcast` / `down` and `up` (split at the deepest bin; the deepest bin is the downcast) |
+
+* **One script, one option.** `raw` is the default, so existing builds and the `ctd_build*.bat/.sh` scripts behave as before. `--source all` builds every source whose folder has files and skips the rest, which makes `ctd_build_all` safe for cruises that have no processed data (for example `ctd_build_all.sh --source all`). An explicit source whose folder is missing is an error.
+* **Cast key.** The text of the file name before `_filter` must equal a `file_key` in `stations.csv` (`20250916_Cabrillo_cast1_filter_align_cell_loop_derive_downcast.cnv` matches `20250916_Cabrillo_cast1`). A file name without `_filter` uses its whole stem. Position and station come from `stations.csv` because `.cnv` files have no usable position.
+* **Fullcast files.** A `.cnv` is preferred; a SeaSoft ASCII export (`.asc`, no header block, column names repeated every 60 rows) is read only when no `.cnv` exists for the same cast.
+* **What is recomputed.** Salinity, temperature, oxygen (umol/kg), pH and chlorophyll are taken from SeaSoft's output. Potential temperature, density and depth are recomputed with the same EOS-80 functions as the raw pipeline. The raw processing steps (soak, CTM, tau shift, loop edit, Wild Edit) are not repeated. The pressure of each SeaSoft bin is kept (for example 61.463 dbar), so processed bins are not on whole-dbar boundaries like raw bins.
+* **Limits.** Processed files have no per-scan time, so every bin carries the cast start time; the `.cnv` flag column gives `qc_flag` (0 = 1, otherwise 3), and `.asc` has none (all 1). Calibration comes from SeaSoft, not from `calibration.xmlcon`; `build_metadata.calibration_sha256` for a processed build is a hash of the input files.
+* **Replacing rows.** Rows are replaced per cruise **and** data source, so rebuilding `downcast` never touches `raw`. An existing database from an earlier version is upgraded automatically on the next build (existing rows are labelled `raw` / `down`).
+* **Dashboard.** The sidebar gets a **Data source** selector (and a **Cast direction** selector when a source holds both directions, as fullcast does). Every tab follows the selection. A database without these columns shows no selector.
+* **Comparing sources.** `python compare_sources.py 2025_MontereyBay --a raw --b downcast` prints, per station and variable, the mean and largest difference in 1 m bins. On the sample Cabrillo cast, raw and SeaSoft salinity and temperature agree to about 0.01 PSU / 0.01 °C on average, while oxygen differs by about 25 umol/kg and pH by 0.04. These come from the calibration coefficients: SeaSoft's sensor block can carry different calibration dates than the `.xmlcon`, and the raw pipeline always uses the `.xmlcon`.
+
+### Cast start time
+
+The SBE 19plus clock on every cruise so far is Pacific local time, so the header time is exactly 7 hours behind `start_utc` in `stations.csv`. The pipeline converts the header time (second precision) to UTC using `INSTRUMENT_TZ` (default `America/Los_Angeles`; set `INSTRUMENT_TZ = "UTC"` in a cruise's `config.toml` if its clock was set to UTC). `start_utc` is the fallback when a file has no header time, and a difference of more than 15 minutes from the converted header time is logged as a warning. `time_iso` in the database is therefore UTC; databases built before this change stored the local header time, so rebuild cruises to update it.
 
 ### Failed casts
 
@@ -267,7 +306,9 @@ The CTD dashboard starts on port 5006 (Panel's default) at `http://localhost:500
 
 The section is a vertical slice through the stations you choose, drawn in the style of Ocean Data View. Controls above the plot:
 
-* **Stations in section:** a list of the cruise's stations. Select the ones that lie along one line (hold Ctrl or Shift for several); **All** and **None** set them all. Choosing a new cruise selects every station again. At least two are needed.
+* **Name contains / From date / To date:** narrow a long station list. Type part of a station name or ID and press Enter, and/or pick a date range (UTC, from each station's first scan). Only the matching stations are listed and they are all selected. A new cruise or data source clears the filters.
+* **Stations in section:** a list of the cruise's stations. Select the ones that lie along one line (hold Ctrl or Shift for several); **All** and **None** set them all. Choosing a new cruise selects every station again. At least two are needed. The section loads only the chosen stations from the database and keeps the last few selections in memory, so changing the variable, axis or gap setting does not query again.
+* **Gridding:** *Weighted average (ODV-style)* (default) estimates every grid value as a weighted average of the nearby data, with weights `exp(-r²)` and `r² = (dx/Lx)² + (dy/Ly)²`, and leaves cells blank when no data lie within about two scale lengths. It gives smooth fields and takes well under a second even for 1,500 stations. *Linear triangulation* is the earlier method: it passes exactly through every measurement and fills the whole triangle between stations, but is slow with many stations and can look streaky. The **Horizontal scale** (percent of the x range) and **Depth scale** (percent of the depth range) sliders, shown for the weighted average, set the scale lengths Lx and Ly. A measurement has weight 1 at the grid point, 0.37 one scale length away, and almost none beyond two, so larger values smooth more and fill wider gaps, and smaller values keep more detail but leave more blank. The white areas between station clusters are cells more than about two scale lengths from any data; raise the horizontal scale to fill them. The horizontal length is never made narrower than about 0.8 times the typical station spacing, so cells between neighbouring stations are not blanked.
 * **X axis:** *Distance along section (km)* (default) projects the chosen stations onto the straight line that fits them best, measured from the southern (or western) end. *Longitude* and *Latitude* order the stations by that coordinate. *Time (days since first station)* spaces them by when they were sampled. *Distance Along Track (km)* is the earlier view: stations in time order with the distances between consecutive stations added up.
 * **Blank gaps wider than (km):** the shading is not drawn between two neighbouring stations that are farther apart than this (default 100 km). Set it to 0 to grid across every gap.
 * **Section map (right of the plot):** shows every station of the cruise in grey, the chosen stations in orange, the first station of the section in green, and the line joining the chosen stations in the order the section draws them in red. It uses the same Esri Ocean Base map as the Map tab (internet needed) and updates when you change the stations or the X axis.
@@ -291,6 +332,8 @@ A cruise that is not one transect (for example 2025_Baja, which visits several a
 | `CHL_OFFSET`     | Additive offset for chlorophyll (µg/L).                                                                                                                                                                                           |
 
 ### SBE Processing Constants
+
+An optional `INSTRUMENT_TZ` key (any IANA time zone name, default `America/Los_Angeles`) sets the time zone of the instrument clock used to convert header times to UTC. See [Cast start time](#cast-start-time).
 
 | Parameter           | Description                                                                                                                                                                                                                                           |
 |---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -327,6 +370,10 @@ A cruise that is not one transect (for example 2025_Baja, which visits several a
 ## Dashboard stops responding
 
 The dashboard stops responding after a period of inactivity and needs to be refreshed (press F5 or reload the page). This is the browser's tab-sleeping setting, on Windows and on Mac: Edge puts an inactive tab to sleep (15 minutes on the Windows machine this was tested on; the time is configurable), and Chrome's Memory Saver can do the same. Either one cuts the tab's link to the dashboard server. In Edge, add the dashboard address to Settings > System and performance > Performance > "Always keep these sites active" (for example `localhost`), or turn off "Automatically put tabs to sleep". In Chrome, use Settings > Performance > "Always keep these sites active", or turn off Memory Saver.
+
+## Acknowledgements
+
+The Vertical Section tab is modelled on the sections in Ocean Data View (ODV). Its weighted-average gridding follows the approach described by R. Schlitzer for ODV (https://odv.awi.de). The implementation in `section_grid.py` is original code written for this project and is not affiliated with or endorsed by ODV or the Alfred Wegener Institute; its results are similar to, but not identical with, ODV's.
 
 ## Contact
 

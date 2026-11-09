@@ -4,6 +4,10 @@ REM
 REM Usage:   ctd_build.bat <cruise_id> [extra args forwarded to main.py]
 REM Example: ctd_build.bat 2025_Baja
 REM Example: ctd_build.bat 2025_Baja --bin-size 0.5
+REM
+REM Builds with --source all: raw .hex data plus any SeaSoft-processed folders
+REM (cnv_downcast, cnv_upcast, cnv_fullcast) the cruise has. Add --source raw
+REM for raw data only (a later --source overrides this default).
 
 REM Capture script directory BEFORE any shift calls.
 REM %~dp0 is derived from %0, which shifts along with %1..%9 on each
@@ -41,7 +45,7 @@ if exist ".venv\Scripts\activate.bat" (
 )
 
 echo Starting CTD build for cruise: %CRUISE_ID%
-python main.py %CRUISE_ID%%EXTRA_ARGS%
+python main.py %CRUISE_ID% --source all%EXTRA_ARGS%
 
 if %ERRORLEVEL% EQU 0 (
     echo.

@@ -7,10 +7,12 @@ import geoviews as gv
 import geoviews.tile_sources as gvts
 import gsw
 import cartopy.crs as ccrs
+import collections
 import pathlib
 import re
 from io import BytesIO
 from scipy.interpolate import griddata
+import section_grid
 from holoviews.operation import contours as hv_contours
 from bokeh.models import HoverTool, ColumnDataSource, LinearAxis, Range1d, CustomJS
 from bokeh.plotting import figure
@@ -104,9 +106,62 @@ con = duckdb.connect(str(DB_PATH), read_only=True)
 # Fetch Metadata
 raw_cruises = con.execute(f"SELECT DISTINCT cruise_id FROM {TABLE_NAME} ORDER BY cruise_id").df()['cruise_id'].tolist()
 
-# Initialize default stations for the first cruise
 default_cruise = raw_cruises[0]
-raw_stations = con.execute(f"SELECT DISTINCT station_id FROM {TABLE_NAME} WHERE cruise_id = ?", (default_cruise,)).df()['station_id'].tolist()
+
+# Data source: databases built by main.py --source ... hold raw (.hex) rows and
+# SeaSoft-processed rows (downcast / upcast / fullcast) side by side.  Databases
+# built before that have no data_source column; the selectors are then hidden.
+HAS_SOURCE = 'data_source' in [r[1] for r in con.execute(f"PRAGMA table_info('{TABLE_NAME}')").fetchall()]
+SOURCE_LABELS = {
+    'raw': 'Raw (.hex)',
+    'downcast': 'Processed downcast (.cnv)',
+    'upcast': 'Processed upcast (.cnv)',
+    'fullcast': 'Processed fullcast (.cnv)',
+}
+_SOURCE_ORDER = list(SOURCE_LABELS)
+
+
+def _sources_for(cruise):
+    """Data sources that have rows for this cruise, in display order."""
+    if not HAS_SOURCE:
+        return ['raw']
+    found = con.execute(f"SELECT DISTINCT data_source FROM {TABLE_NAME} WHERE cruise_id = ?", (cruise,)).df()['data_source'].tolist()
+    return [x for x in _SOURCE_ORDER if x in found] or ['raw']
+
+
+def _directions_for(cruise, source):
+    """Cast directions stored for this cruise and source ('down' first)."""
+    if not HAS_SOURCE:
+        return ['down']
+    found = con.execute(
+        f"SELECT DISTINCT cast_direction FROM {TABLE_NAME} WHERE cruise_id = ? AND data_source = ?",
+        (cruise, source)).df()['cast_direction'].tolist()
+    return [x for x in ('down', 'up') if x in found] or ['down']
+
+
+_init_sources = _sources_for(default_cruise)
+source_select = pn.widgets.Select(
+    name='Data source', options={SOURCE_LABELS[x]: x for x in _init_sources}, value=_init_sources[0])
+_init_dirs = _directions_for(default_cruise, _init_sources[0])
+direction_select = pn.widgets.Select(
+    name='Cast direction', options={'Downcast': 'down', 'Upcast': 'up'}, value=_init_dirs[0])
+direction_select.options = {{'down': 'Downcast', 'up': 'Upcast'}[x]: x for x in _init_dirs}
+direction_select.value = _init_dirs[0]
+direction_select.visible = HAS_SOURCE and len(_init_dirs) > 1
+source_select.visible = HAS_SOURCE
+
+
+def _T():
+    """Table expression for the selected data source and cast direction."""
+    if not HAS_SOURCE:
+        return TABLE_NAME
+    src = source_select.value if source_select.value in SOURCE_LABELS else 'raw'
+    dirn = direction_select.value if direction_select.value in ('down', 'up') else 'down'
+    return f"(SELECT * FROM {TABLE_NAME} WHERE data_source = '{src}' AND cast_direction = '{dirn}')"
+
+
+# Initialize default stations for the first cruise
+raw_stations = con.execute(f"SELECT DISTINCT station_id FROM {_T()} WHERE cruise_id = ?", (default_cruise,)).df()['station_id'].tolist()
 stations = sorted(raw_stations, key=lambda x: int(re.findall(r'\d+', x)[-1]) if re.findall(r'\d+', x) else 0)
 
 # 3. GLOBAL WIDGETS
@@ -118,14 +173,58 @@ soak_toggle = pn.widgets.Checkbox(name='Show Soak Data (Surface)', value=False)
 
 # Callback to update stations when cruise changes
 def update_stations(event):
-    new_cruise = event.new
-    new_stations = con.execute(f"SELECT DISTINCT station_id FROM {TABLE_NAME} WHERE cruise_id = ?", (new_cruise,)).df()['station_id'].tolist()
+    new_cruise = cruise_select.value
+    new_stations = con.execute(f"SELECT DISTINCT station_id FROM {_T()} WHERE cruise_id = ?", (new_cruise,)).df()['station_id'].tolist()
     sorted_stations = sorted(new_stations, key=lambda x: int(re.findall(r'\d+', x)[-1]) if re.findall(r'\d+', x) else 0)
+    keep = station_select.value
     station_select.options = sorted_stations
     if sorted_stations:
-        station_select.value = sorted_stations[0]
+        station_select.value = keep if keep in sorted_stations else sorted_stations[0]
 
+_refreshing = False
+
+
+def _set_direction_options(cruise, source):
+    dirs = _directions_for(cruise, source)
+    direction_select.options = {{'down': 'Downcast', 'up': 'Upcast'}[x]: x for x in dirs}
+    if direction_select.value not in dirs:
+        direction_select.value = dirs[0]
+    direction_select.visible = HAS_SOURCE and len(dirs) > 1
+
+
+def _on_cruise_for_source(event):
+    """A new cruise may offer different sources / directions."""
+    global _refreshing
+    _refreshing = True
+    try:
+        srcs = _sources_for(event.new)
+        source_select.options = {SOURCE_LABELS[x]: x for x in srcs}
+        if source_select.value not in srcs:
+            source_select.value = srcs[0]
+        _set_direction_options(event.new, source_select.value)
+    finally:
+        _refreshing = False
+
+
+def _on_source_or_direction(event):
+    """Source or direction changed: refresh everything that depends on the cruise."""
+    if _refreshing:
+        return
+    if event.obj is source_select:
+        _set_direction_options(cruise_select.value, source_select.value)
+    # Re-fire the cruise dependency so every bound view, the station list and
+    # the section station list re-query with the new source.
+    cruise_select.param.trigger('value')
+
+
+if HAS_SOURCE:
+    # Registered first so the source/direction options are valid for the new cruise
+    # before update_stations and the bound views query.
+    cruise_select.param.watch(_on_cruise_for_source, 'value')
 cruise_select.param.watch(update_stations, 'value')
+if HAS_SOURCE:
+    source_select.param.watch(_on_source_or_direction, 'value')
+    direction_select.param.watch(_on_source_or_direction, 'value')
 
 # 4. DATA LOGIC
 @pn.depends(cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle)
@@ -134,7 +233,7 @@ def get_clean_df(target_cruise, target_id, z_range, filter_qc, show_soak):
     qc_clause = "AND qc_flag < 3" if filter_qc else ""
     soak_clause = "" if show_soak else "AND is_soak = 0"
     query = f"""
-        SELECT * FROM {TABLE_NAME}
+        SELECT * FROM {_T()}
         WHERE cruise_id = ?
         AND station_id = ?
         AND dbar_bin BETWEEN ? AND ?
@@ -178,7 +277,7 @@ def _cruise_summary_impl(target_cruise):
         MIN(lat) as "Lat", MIN(lon) as "Lon", MIN(time_iso)::TIMESTAMP as "Start Time",
         CAST(MAX(depth_m) AS DECIMAL(10,1)) as "Max Depth (m)",
         ROUND((SUM(CASE WHEN qc_flag = 1 THEN 1 ELSE 0 END) * 100.0) / COUNT(*), 1) as "Health %"
-        FROM {TABLE_NAME} WHERE cruise_id = ?
+        FROM {_T()} WHERE cruise_id = ?
         GROUP BY station_id, wf_cast, sb_cast ORDER BY "Start Time" ASC
     """
     df_sum = con.execute(query, (target_cruise,)).df()
@@ -349,7 +448,7 @@ STATION_COLORS = {'selected station': '#ff1a1a', 'other stations': '#ffb000'}
 @pn.depends(cruise_select, station_select)
 def view_map_geolocation(target_cruise, target_id):
     """Station positions on the Esri Ocean Base map: the selected station in red, the others in amber."""
-    st = con.execute(f"SELECT station_id, AVG(lat) AS lat, AVG(lon) AS lon FROM {TABLE_NAME} "
+    st = con.execute(f"SELECT station_id, AVG(lat) AS lat, AVG(lon) AS lon FROM {_T()} "
                      "WHERE cruise_id = ? AND lat IS NOT NULL AND lon IS NOT NULL GROUP BY station_id", (target_cruise,)).df()
     if st.empty:
         return pn.pane.Alert('No station positions for this cruise.', alert_type='warning')
@@ -407,22 +506,90 @@ _SECTION_AXES = {
     'Time (days since first station)':   'time',
     'Distance Along Track (km)':         'track',      # the original view: time order, summed hops between stations
 }
+_SECTION_GRIDS = {'Weighted average (ODV-style)': 'wavg', 'Linear triangulation': 'linear'}
+section_grid_select = pn.widgets.Select(name='Gridding', options=list(_SECTION_GRIDS), value='Weighted average (ODV-style)', width=230)
+section_lx_slider = pn.widgets.FloatSlider(name='Horizontal scale (% of x range)', start=0.5, end=30, value=5, step=0.5, width=230)
+section_ly_slider = pn.widgets.FloatSlider(name='Depth scale (% of depth range)', start=0.5, end=20, value=2, step=0.5, width=230)
+
+
+def _section_grid_visibility(event=None):
+    on = _SECTION_GRIDS[section_grid_select.value] == 'wavg'
+    section_lx_slider.visible = on
+    section_ly_slider.visible = on
+
+
+section_grid_select.param.watch(_section_grid_visibility, 'value')
 section_axis_select = pn.widgets.Select(name='X axis', options=list(_SECTION_AXES), value='Distance along section (km)', width=230)
 section_gap_slider = pn.widgets.IntSlider(name='Blank gaps wider than (km; 0 = off)', start=0, end=500, value=100, step=10, width=230)
 section_station_select = pn.widgets.MultiSelect(name='Stations in section', options=stations, value=list(stations), size=10, width=230)
 section_all_btn = pn.widgets.Button(name='All', width=70)
 section_none_btn = pn.widgets.Button(name='None', width=70)
 
+# Narrow a long station list: by name and by date.  Applying a filter lists only the
+# matching stations and selects them all; "All" then selects the stations listed.
+section_name_filter = pn.widgets.TextInput(name='Name contains', placeholder='type, then press Enter', width=230)
+section_date_from = pn.widgets.DatePicker(name='From date (UTC)', width=112)
+section_date_to = pn.widgets.DatePicker(name='To date (UTC)', width=112)
+_section_filter_busy = False
+
+
+def _station_sort_key(x):
+    n = re.findall(r'\d+', x)
+    return int(n[-1]) if n else 0
+
+
+def _cruise_station_info(cruise):
+    """One row per station of the cruise (current source): station_id, station_name, first time."""
+    return con.execute(
+        f"SELECT station_id, ANY_VALUE(station_name) AS station_name, MIN(time_iso) AS t "
+        f"FROM {_T()} WHERE cruise_id = ? GROUP BY station_id", (cruise,)).df()
+
 
 def _cruise_station_list(cruise):
-    ids = con.execute(f"SELECT DISTINCT station_id FROM {TABLE_NAME} WHERE cruise_id = ?", (cruise,)).df()['station_id'].tolist()
-    return sorted(ids, key=lambda x: int(re.findall(r'\d+', x)[-1]) if re.findall(r'\d+', x) else 0)
+    ids = _cruise_station_info(cruise)['station_id'].tolist()
+    return sorted(ids, key=_station_sort_key)
+
+
+def _filtered_station_list(cruise):
+    """Station ids of the cruise that pass the name and date filters, in station order."""
+    info = _cruise_station_info(cruise)
+    keep = pd.Series(True, index=info.index)
+    name = (section_name_filter.value or '').strip()
+    if name:
+        keep &= (info['station_name'].astype(str).str.contains(name, case=False, regex=False)
+                 | info['station_id'].astype(str).str.contains(name, case=False, regex=False))
+    t = pd.to_datetime(info['t'], utc=True, errors='coerce').dt.tz_localize(None)
+    if section_date_from.value:
+        keep &= t >= pd.Timestamp(section_date_from.value)
+    if section_date_to.value:
+        keep &= t < pd.Timestamp(section_date_to.value) + pd.Timedelta(days=1)
+    return sorted(info.loc[keep, 'station_id'].tolist(), key=_station_sort_key)
+
+
+def _apply_section_filter(event=None):
+    if _section_filter_busy:
+        return
+    ids = _filtered_station_list(cruise_select.value)
+    # One update, so the section and its map redraw once.
+    section_station_select.param.update(options=ids, value=list(ids))
 
 
 def _section_stations_for_cruise(event):
-    ids = _cruise_station_list(event.new)
-    section_station_select.options = ids
-    section_station_select.value = list(ids)          # a new cruise starts with every station
+    """A new cruise (or source) clears the filters and starts with every station."""
+    global _section_filter_busy
+    _section_filter_busy = True
+    try:
+        info = _cruise_station_info(event.new)
+        t = pd.to_datetime(info['t'], utc=True, errors='coerce').dt.tz_localize(None).dropna()
+        lo = t.min().date() if len(t) else None
+        hi = t.max().date() if len(t) else None
+        section_name_filter.value = ''
+        section_date_from.param.update(start=lo, end=hi, value=None)
+        section_date_to.param.update(start=lo, end=hi, value=None)
+    finally:
+        _section_filter_busy = False
+    ids = sorted(info['station_id'].tolist(), key=_station_sort_key)
+    section_station_select.param.update(options=ids, value=list(ids))
 
 
 def _section_select_all(event):
@@ -434,6 +601,9 @@ def _section_select_none(event):
 
 
 cruise_select.param.watch(_section_stations_for_cruise, 'value')
+section_name_filter.param.watch(_apply_section_filter, 'value')
+section_date_from.param.watch(_apply_section_filter, 'value')
+section_date_to.param.watch(_apply_section_filter, 'value')
 section_all_btn.on_click(_section_select_all)
 section_none_btn.on_click(_section_select_none)
 
@@ -467,34 +637,59 @@ def _section_positions(sta, mode):
     return pd.Series(proj - proj.min(), index=sta.index)
 
 
-def _section_impl(target_cruise, z_range, filter_qc, section_var_label, chosen_stations, axis_label, gap_km):
-    col, cmap, unit = _SECTION_VARS[section_var_label]
-    qc_clause = "AND qc_flag < 3" if filter_qc else ""
-    query = f"""
+# Rows for the section, fetched only for the chosen stations and kept for the next few redraws.
+# Changing the variable, x axis or gap setting reuses them instead of querying again.
+_SECTION_CACHE = collections.OrderedDict()
+_SECTION_CACHE_MAX = 4
+
+
+def _section_rows(cruise, stations, z0, z1, qc):
+    """Rows (without soak) of the chosen stations, with sigma added.  ``stations`` is a sorted
+    tuple, or None for every station of the cruise.  Treat the result as read-only."""
+    key = (_T(), cruise, stations, z0, z1, qc)
+    if key in _SECTION_CACHE:
+        _SECTION_CACHE.move_to_end(key)
+        return _SECTION_CACHE[key]
+    qc_clause = "AND qc_flag < 3" if qc else ""
+    station_clause = "AND list_contains(?, station_id)" if stations is not None else ""
+    params = [cruise, z0, z1] + ([list(stations)] if stations is not None else [])
+    df = con.execute(f"""
         SELECT station_id, station_name, lat, lon, time_iso, depth_m, dbar_bin,
                theta, in_situ_temp, SP, rho, o2_final, ph_final, chl_final
-        FROM {TABLE_NAME}
+        FROM {_T()}
         WHERE cruise_id = ?
         AND dbar_bin BETWEEN ? AND ?
         AND is_soak = 0
+        {station_clause}
         {qc_clause}
         ORDER BY station_id, dbar_bin ASC
-    """
-    df = con.execute(query, (target_cruise, z_range[0], z_range[1])).df()
-    if df.empty:
-        return pn.pane.Alert("No data available for section plot.")
-
+    """, params).df()
     # Always compute sigma — needed for isopycnal contours regardless of variable
     df['sigma'] = df['rho'] - 1000
+    _SECTION_CACHE[key] = df
+    while len(_SECTION_CACHE) > _SECTION_CACHE_MAX:
+        _SECTION_CACHE.popitem(last=False)
+    return df
+
+
+def _section_impl(target_cruise, z_range, filter_qc, section_var_label, chosen_stations, axis_label, gap_km,
+                  grid_label='Weighted average (ODV-style)', lx_pct=5.0, ly_pct=2.0):
+    col, cmap, unit = _SECTION_VARS[section_var_label]
+    if not chosen_stations:
+        return pn.pane.Alert("Choose at least two stations for the section.", alert_type='warning')
+
+    # Fetch only the chosen stations.  A stale list from another cruise matches nothing: use every station.
+    chosen_key = tuple(sorted(chosen_stations))
+    df = _section_rows(target_cruise, chosen_key, z_range[0], z_range[1], bool(filter_qc))
+    if df.empty:
+        df = _section_rows(target_cruise, None, z_range[0], z_range[1], bool(filter_qc))
+    if df.empty:
+        return pn.pane.Alert("No data available for section plot.")
+    df = df.copy()                                  # the cached rows stay untouched
 
     if col not in df.columns:
         return pn.pane.Alert(f"Column '{col}' not found in data.")
 
-    # Keep only the stations chosen for this section (a stale list from another cruise means "all of them").
-    if not chosen_stations:
-        return pn.pane.Alert("Choose at least two stations for the section.", alert_type='warning')
-    chosen = df[df['station_id'].isin(chosen_stations)]
-    df = (chosen if not chosen.empty else df).copy()
     if df['station_id'].nunique() < 2:
         return pn.pane.Alert("Choose at least two stations for the section.", alert_type='warning')
 
@@ -537,7 +732,21 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label, chosen_s
     Xi, Yi = np.meshgrid(xi, yi)
     # Scale both axes to 0..1 for the triangulation, so a tiny range (degrees) is not squashed against metres.
     sx, sy = max(float(np.ptp(xm)), 1e-9), max(float(np.ptp(ym)), 1e-9)
-    Zi = griddata((xm / sx, ym / sy), zm, (Xi / sx, Yi / sy), method='linear')
+    grid_method = _SECTION_GRIDS.get(grid_label, 'wavg')
+    if grid_method == 'wavg':
+        # ODV-style weighted average on the section grid (see section_grid.py).
+        st_index = {s_id: i for i, s_id in enumerate(station_order)}
+        row_st = df['station_id'].map(st_index).to_numpy(dtype=float)
+        row_st = np.where(np.isnan(row_st), -1, row_st).astype(int)
+        lx = section_grid.effective_horizontal_scale(cum_dist, np.ptp(xm), lx_pct)
+        ly = max(float(np.ptp(ym)) * float(ly_pct) / 100.0, 1e-9)
+
+        def _grid_field(vals, ok):
+            return section_grid.weighted_average_grid(
+                cum_dist, row_st[ok], y_all[ok], vals[ok], xi, yi, lx, ly)
+        Zi = _grid_field(z, mask)
+    else:
+        Zi = griddata((xm / sx, ym / sy), zm, (Xi / sx, Yi / sy), method='linear')
 
     def _blank_gaps(Z):
         for g0, g1 in gaps:
@@ -564,9 +773,12 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label, chosen_s
     # ── Isopycnal contours (σθ, every 0.5 kg/m³) ─────────────────────────────
     s_vals = df['sigma'].values.astype(float)
     s_mask = base_mask & ~np.isnan(s_vals)
-    Zi_sigma = _blank_gaps(griddata(
-        (x_all[s_mask] / sx, y_all[s_mask] / sy), s_vals[s_mask], (Xi / sx, Yi / sy), method='linear'
-    ))
+    if grid_method == 'wavg':
+        Zi_sigma = _blank_gaps(_grid_field(s_vals, s_mask))
+    else:
+        Zi_sigma = _blank_gaps(griddata(
+            (x_all[s_mask] / sx, y_all[s_mask] / sy), s_vals[s_mask], (Xi / sx, Yi / sy), method='linear'
+        ))
     s_clean = Zi_sigma[~np.isnan(Zi_sigma)]
     if len(s_clean) > 0:
         lvl_min = np.ceil(s_clean.min() * 2) / 2
@@ -585,10 +797,9 @@ def _section_impl(target_cruise, z_range, filter_qc, section_var_label, chosen_s
     )
 
     # ── Station marker lines ──────────────────────────────────────────────────
-    sta_lines = hv.Overlay([
-        hv.VLine(d).opts(color='white', line_width=0.8, line_dash='dashed', alpha=0.5)
-        for d in cum_dist
-    ])
+    # One element for all stations (one VLine per station took tens of seconds with 1,500 stations).
+    sta_lines = hv.VLines(list(map(float, cum_dist))).opts(
+        color='white', line_width=0.8, line_dash='dashed', alpha=0.5)
 
     # ── Station hover markers (triangle at surface, shows name on hover) ────────
     sta_names = df.groupby('station_id')['station_name'].first()
@@ -618,7 +829,7 @@ SECTION_MAP_W, SECTION_MAP_H = 440, 520
 
 def _section_map_impl(target_cruise, chosen_stations, axis_label):
     """Map of the section: every station of the cruise, the ones in the section, and the line joining them in section order."""
-    st = con.execute(f"SELECT station_id, MIN(lat) AS lat, MIN(lon) AS lon, MIN(time_iso) AS t FROM {TABLE_NAME} "
+    st = con.execute(f"SELECT station_id, MIN(lat) AS lat, MIN(lon) AS lon, MIN(time_iso) AS t FROM {_T()} "
                      "WHERE cruise_id = ? AND lat IS NOT NULL AND lon IS NOT NULL GROUP BY station_id",
                      (target_cruise,)).df()
     if st.empty:
@@ -666,10 +877,13 @@ def _section_map_impl(target_cruise, chosen_stations, axis_label):
 
 view_section = pn.Column(
     pn.Row(section_var_select, section_axis_select, section_gap_slider, margin=(8, 0, 4, 10)),
+    pn.Row(section_grid_select, section_lx_slider, section_ly_slider, margin=(0, 0, 4, 10), align='start'),
     pn.Row(
-        pn.Column(section_station_select, pn.Row(section_all_btn, section_none_btn), margin=(0, 10, 0, 10)),
+        pn.Column(section_name_filter, pn.Row(section_date_from, section_date_to),
+                  section_station_select, pn.Row(section_all_btn, section_none_btn), margin=(0, 10, 0, 10)),
         pn.bind(_section_impl, cruise_select, depth_slider, qc_checkbox, section_var_select,
-                section_station_select, section_axis_select, section_gap_slider),
+                section_station_select, section_axis_select, section_gap_slider,
+                section_grid_select, section_lx_slider, section_ly_slider),
         pn.bind(_section_map_impl, cruise_select, section_station_select, section_axis_select),
     ),
     sizing_mode='stretch_both',
@@ -704,7 +918,7 @@ tabs = pn.Tabs(
 
 dashboard = pn.template.FastListTemplate(
     title="R/V Western Flyer - CTD (SBE 19plus V2)",
-    sidebar=[cruise_select, station_select, depth_slider, qc_checkbox, soak_toggle, pn.pane.Markdown("---"), csv_button],
+    sidebar=[cruise_select, source_select, direction_select, station_select, depth_slider, qc_checkbox, soak_toggle, pn.pane.Markdown("---"), csv_button],
     main=[tabs], accent_base_color="#00f2ff", header_background="#1a1a1a"
 )
 

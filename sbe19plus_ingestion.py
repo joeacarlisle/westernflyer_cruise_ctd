@@ -180,6 +180,53 @@ def parse_xmlcon(xmlcon_path):
 # Hex header parser
 # ---------------------------------------------------------------------------
 
+INSTRUMENT_TZ_DEFAULT = 'America/Los_Angeles'
+_START_MISMATCH_MIN = 15.0
+
+
+def resolve_cast_start_utc(header_start, meta, config, name):
+    """Returns the cast start time as a naive UTC pd.Timestamp.
+
+    The instrument clock is local time (all Western Flyer cruises to date:
+    Pacific, header = stations.csv start_utc - 7 h), so the header time is
+    converted from ``INSTRUMENT_TZ`` (config.toml, default
+    America/Los_Angeles; use "UTC" if a cruise's clock was set to UTC) to
+    UTC.  The header keeps second precision.  ``start_utc`` from
+    stations.csv is the fallback when the header has no time, and a
+    cross-check: a difference over 15 minutes is logged as a warning so
+    typos in either source are visible.
+    """
+    tz = config.get('INSTRUMENT_TZ', INSTRUMENT_TZ_DEFAULT)
+    logged = pd.to_datetime((meta or {}).get('start_utc'), errors='coerce')
+
+    start = pd.NaT
+    if header_start is not None and not pd.isnull(header_start):
+        try:
+            local = pd.Timestamp(header_start).tz_localize(
+                tz, ambiguous='NaT', nonexistent='NaT')
+            if not pd.isnull(local):
+                start = local.tz_convert('UTC').tz_localize(None)
+        except Exception as exc:   # bad time-zone name, etc.
+            logging.warning("%s: cannot convert header time with INSTRUMENT_TZ=%r: %s",
+                            name, tz, exc)
+
+    if pd.isnull(start):
+        if not pd.isnull(logged):
+            logging.warning("%s: no usable cast time in the file header; "
+                            "using stations.csv start_utc.", name)
+            return logged
+        return pd.NaT
+
+    if not pd.isnull(logged):
+        diff_min = abs((start - logged).total_seconds()) / 60.0
+        if diff_min > _START_MISMATCH_MIN:
+            logging.warning(
+                "%s: header time (%s UTC, from %s) differs from stations.csv start_utc "
+                "(%s) by %.1f h; using the header time. Check stations.csv or INSTRUMENT_TZ.",
+                name, start, tz, logged, diff_min / 60.0)
+    return start
+
+
 def parse_hex_header(hex_path):
     """Parse the ASCII header block of an SBE 19plus .hex file.
 
@@ -371,11 +418,13 @@ def ingest_sbe_hex(file_path, cruise_log, config, sensor_coefs):
     # --- Parse hex header ---
     start_time, sample_interval_s = parse_hex_header(file_path)
 
-    if start_time is None or pd.isnull(start_time):
-        start_time = pd.to_datetime(meta.get('start_utc', default_meta['start_utc']))
-        logging.warning(
-            "%s: no cast start_time in hex header; using cruise_log start_utc.", file_path.name
-        )
+    # Header time is instrument-local; convert to UTC (see resolve_cast_start_utc).
+    start_time = resolve_cast_start_utc(
+        start_time, meta if file_stem in cruise_log else None, config, file_path.name)
+    if pd.isnull(start_time):
+        start_time = pd.to_datetime(default_meta['start_utc'])
+        logging.warning("%s: no cast start time available; using placeholder %s.",
+                        file_path.name, start_time)
 
     # --- Read raw hex data via Sea-Bird Scientific toolkit ---
     raw = read_hex_file(
